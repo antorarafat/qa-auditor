@@ -89,6 +89,7 @@ function rowsToUsers(values) {
 function createGoogleSheetStore(config = {}) {
   const spreadsheetId = config.spreadsheetId || process.env.GOOGLE_SHEETS_ID;
   const sheetName = config.sheetName || process.env.GOOGLE_SHEETS_TAB || 'user';
+  const companySheetName = config.companySheetName || process.env.GOOGLE_SHEETS_COMPANY_TAB || 'company';
   let sheetsClient;
 
   function getClient() {
@@ -120,10 +121,35 @@ function createGoogleSheetStore(config = {}) {
     return rowsToUsers(response.data.values || []);
   }
 
+  async function readCompanyName() {
+    assertConfigured();
+    try {
+      const response = await getClient().spreadsheets.values.get({
+        spreadsheetId,
+        range: `'${companySheetName.replace(/'/g, "''")}'!A1:B20`,
+        valueRenderOption: 'UNFORMATTED_VALUE'
+      });
+      const values = response.data.values || [];
+      if (!values.length) return null;
+      const headers = values[0].map(normalizeHeader);
+      const companyColumn = headers.indexOf(normalizeHeader('Company Name'));
+      if (companyColumn >= 0) {
+        return String(values.slice(1).find(row => row[companyColumn])?.[companyColumn] || '').trim() || null;
+      }
+      return String(values[0][0] || '').trim() || null;
+    } catch (error) {
+      console.error('Company tab lookup skipped:', error.message);
+      return null;
+    }
+  }
+
   return {
     async findByEmail(email) {
       const normalized = normalizeEmail(email);
-      return (await readUsers()).find(user => user.email === normalized) || null;
+      const [users, companyName] = await Promise.all([readUsers(), readCompanyName()]);
+      const user = users.find(item => item.email === normalized) || null;
+      if (user && companyName) user.companyName = companyName;
+      return user;
     },
     async incrementUsage(email) {
       assertConfigured();

@@ -2,7 +2,7 @@
 
 This app now runs through a Node backend. The backend authenticates users from the `user` tab in the `QA Auditor` spreadsheet and keeps provider API keys server-side.
 
-Add a `Company Name` column to the `user` tab to brand each account’s sidebar and workspace. `Company` and `Organization` are also accepted; accounts without a value fall back to `10 Minute School`.
+The `company` tab contains `Company Name` in `A1` and the global company name in `A2`; the current value is `10 Minute School`. `Company` and `Organization` columns inside `user` remain supported as fallbacks.
 
 The interface defaults to English and includes an English/Bangla toggle. Audit reports remain Bangla regardless of the selected interface language.
 

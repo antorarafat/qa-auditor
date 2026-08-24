@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 Minute School QA Audit & Call Coach</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Marked.js for Markdown Parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Sanitize AI-generated HTML before rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+    <!-- html2pdf.js for clean PDF export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <!-- Custom Typography & CSS Styles -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Hind Siliguri', sans-serif;
+            background-color: #f8fafc;
+        }
+
+        /* Rendered Markdown Styling */
+        .prose {
+            max-width: 100%;
+            color: #1e293b;
+        }
+        .prose table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1.25rem;
+            margin-bottom: 1.25rem;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        }
+        .prose th, .prose td {
+            border: 1px solid #e2e8f0;
+            padding: 0.75rem 1rem;
+            text-align: left;
+            font-size: 0.9rem;
+        }
+        .prose th {
+            background-color: #f1f5f9;
+            font-weight: 700;
+            color: #0f172a;
+        }
+        .prose tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+        .prose h1 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #dc2626;
+            border-bottom: 2px solid #fee2e2;
+            padding-bottom: 0.5rem;
+            margin-top: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .prose h2 {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #1e40af;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .prose h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #334155;
+            margin-top: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+        .prose ul {
+            list-style-type: disc;
+            padding-left: 1.5rem;
+            margin-top: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .prose ol {
+            list-style-type: decimal;
+            padding-left: 1.5rem;
+            margin-top: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .prose li {
+            margin-bottom: 0.4rem;
+            line-height: 1.6;
+        }
+        .prose blockquote {
+            border-left: 4px solid #dc2626;
+            background-color: #fef2f2;
+            padding: 0.75rem 1rem;
+            border-radius: 0 0.5rem 0.5rem 0;
+            margin: 1rem 0;
+            font-style: italic;
+        }
+        .prose strong {
+            color: #0f172a;
+        }
+
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="text-gray-800 min-h-screen flex flex-col">
+
+    <!-- Authentication gate -->
+    <div id="authOverlay" class="fixed inset-0 z-[100] bg-slate-900/95 flex items-center justify-center p-4">
+        <form id="loginForm" class="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-6" autocomplete="on">
+            <div class="flex items-center gap-3 mb-5">
+                <div class="bg-red-100 text-red-600 p-3 rounded-xl"><i class="fa-solid fa-lock"></i></div>
+                <div>
+                    <h2 class="text-lg font-bold text-gray-900">QA Auditor Login</h2>
+                    <p class="text-xs text-gray-500">আপনার অনুমোদিত অ্যাকাউন্ট দিয়ে প্রবেশ করুন</p>
+                </div>
+            </div>
+            <label class="block text-xs font-bold text-gray-700 mb-1" for="loginEmail">ইমেইল</label>
+            <input id="loginEmail" name="email" type="email" required autocomplete="username" class="w-full text-sm p-2.5 mb-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:outline-none">
+            <label class="block text-xs font-bold text-gray-700 mb-1" for="loginPassword">পাসওয়ার্ড</label>
+            <input id="loginPassword" name="password" type="password" required autocomplete="current-password" class="w-full text-sm p-2.5 mb-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:outline-none">
+            <p id="loginError" class="hidden text-xs text-red-600 mb-3"></p>
+            <button id="loginBtn" type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-lg transition-colors">লগইন</button>
+        </form>
+    </div>
+
+    <!-- Header -->
+    <header class="bg-gradient-to-r from-red-600 via-red-700 to-red-800 text-white shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-3">
+            <div class="flex items-center space-x-3.5">
+                <div class="bg-white text-red-600 p-2.5 rounded-2xl shadow-md flex items-center justify-center">
+                    <i class="fa-solid fa-headset text-2xl sm:text-3xl"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-xl sm:text-2xl font-bold tracking-tight">10 Minute School</h1>
+                    </div>
+                    <p class="text-xs sm:text-sm text-red-100 mt-0.5">AI-Powered Call Quality Audit, Fact-Checking & Advisor Coaching System</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <button onclick="loadDemoData()" class="bg-white/10 hover:bg-white/20 text-white text-xs px-3 py-1.5 rounded-lg border border-white/20 transition-all flex items-center gap-1.5 font-medium">
+                    <i class="fa-solid fa-wand-magic-sparkles text-amber-300"></i>
+                    <span>ডেমো ডেটা লোড করুন</span>
+                </button>
+                <div id="currentUserBadge" class="hidden text-xs bg-red-950/40 px-3 py-1.5 rounded-lg border border-red-500/20"></div>
+                <button id="logoutBtn" type="button" class="hidden bg-white/10 hover:bg-white/20 text-white text-xs px-3 py-1.5 rounded-lg border border-white/20">লগআউট</button>
+                <div class="hidden sm:flex items-center space-x-1.5 bg-red-950/40 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-500/20">
+                    <i class="fa-solid fa-shield-halved text-green-400"></i>
+                    <span>Enterprise Grade Audit</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        
+        <!-- Input Section Container -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 sm:p-7 mb-8">
+            
+            <!-- Accordion Settings for Custom QA & Product Brief -->
+            <div class="mb-6 border border-gray-200 rounded-xl overflow-hidden bg-gray-50/50">
+                <button type="button" id="toggleSettingsBtn" onclick="toggleSettingsPanel()" class="w-full flex justify-between items-center p-4 bg-gray-100 hover:bg-gray-200/80 transition-colors text-left font-semibold text-gray-800 text-sm">
+                    <span class="flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-red-600"></i>
+                        ⚙️ কাস্টম QA সেটিং, প্রোডাক্ট ব্রিফ (Fact Sheet) ও API সেটিং
+                    </span>
+                    <i id="settingsChevron" class="fa-solid fa-chevron-down text-gray-500 transition-transform duration-200"></i>
+                </button>
+
+                <div id="settingsPanel" class="hidden p-5 border-t border-gray-200 bg-white space-y-5">
+
+                    <!-- AI Provider Selector -->
+                    <div>
+                        <label class="text-xs font-bold text-gray-700 block mb-1">
+                            🤖 AI প্রোভাইডার বাছাই করুন:
+                        </label>
+                        <select id="aiProviderSelect" class="w-full text-xs p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:outline-none bg-white font-medium text-gray-700">
+                            <option value="gemini">Google Gemini (অডিও সরাসরি সাপোর্ট করে - ডিফল্ট)</option>
+                            <option value="openai">OpenAI (gpt-4o-audio-preview - অডিও সাপোর্ট করে)</option>
+                        </select>
+                        <p class="text-[10px] text-gray-400 mt-1">লগইন করা অ্যাকাউন্টের জন্য সংরক্ষিত provider key সার্ভার ব্যবহার করবে। কোনো key ব্রাউজারে পাঠানো হয় না।</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        
+                        <!-- Product Brief Field -->
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label class="text-xs font-bold text-gray-700">
+                                    📦 Product Brief / Fact Sheet (তথ্য নির্ভুলতা যাচাইয়ের জন্য):
+                                </label>
+                                <button type="button" onclick="loadSampleBrief()" class="text-[11px] text-red-600 hover:underline font-semibold">
+                                    + ডেমো কোর্স ব্রিফ
+                                </button>
+                            </div>
+                            <textarea id="productBriefText" rows="6" placeholder="কোর্সের নাম, ডিসকাউন্ট প্রাইস, রেগুলার প্রাইস, অফার শেষ হওয়ার তারিখ, ক্লাসের নিয়মাবলী ইত্যাদি পেস্ট করুন। AI এটি থেকে কলের সঠিকতা এবং Fact Check করবে।" class="w-full text-xs p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:outline-none custom-scrollbar"></textarea>
+                            
+                            <div class="mt-2 flex items-center justify-between text-xs">
+                                <label class="cursor-pointer inline-flex items-center gap-1 text-red-600 hover:text-red-700 font-medium">
+                                    <i class="fa-solid fa-file-arrow-up"></i> Brief `.txt` আপলোড
+                                    <input type="file" id="briefFileInput" accept=".txt" class="hidden" onchange="handleBriefFileUpload(event)">
+                                </label>
+                                <button type="button" onclick="clearBriefText()" class="text-gray-400 hover:text-red-500">
+                                    <i class="fa-solid fa-trash-can"></i> রিসেট
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Custom QA Scorecard Settings -->
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label class="text-xs font-bold text-gray-700">
+                                    📋 Custom QA Parameter Scorecard:
+                                </label>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="useCustomQA" onchange="toggleCustomQATextarea()" class="sr-only peer">
+                                    <div class="w-8 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-red-600 relative"></div>
+                                    <span class="ml-1.5 text-xs font-semibold text-gray-600">কাস্টম নিয়ম চালু</span>
+                                </label>
+                            </div>
+                            <textarea id="customQAParameters" rows="6" disabled placeholder="নিজের মতো করে QA প্যারামিটার ও নম্বর বন্টন লিখুন..." class="w-full text-xs p-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-400 focus:ring-2 focus:ring-red-500 focus:outline-none custom-scrollbar transition-all"></textarea>
+                            <div class="mt-2 flex justify-between items-center text-[11px]">
+                                <span class="text-gray-500">অন থাকলে এই প্যারামিটারগুলোতে মার্কিং করা হবে।</span>
+                                <button type="button" onclick="resetQAScorecard()" class="text-red-600 hover:underline">ডিফল্ট স্কোরকার্ড আনুন</button>
+                            </div>
+                        </div>
+
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Audio Upload & File Player Area -->
+            <div class="mb-6">
+                <label class="block text-sm font-bold text-gray-800 mb-2">
+                    🎙️ কল রেকর্ডিং ফাইল আপলোড করুন (একাধিক অডিও সাপোর্ট করে):
+                </label>
+                <div id="dropzone" onclick="document.getElementById('audioFileInput').click()" class="border-2 border-dashed border-red-300 hover:border-red-500 bg-red-50/40 hover:bg-red-50 transition-all rounded-xl p-6 text-center cursor-pointer flex flex-col items-center justify-center group">
+                    <div class="w-12 h-12 bg-red-100 group-hover:bg-red-600 group-hover:text-white text-red-600 rounded-full flex items-center justify-center mb-3 transition-colors">
+                        <i class="fa-solid fa-cloud-arrow-up text-xl"></i>
+                    </div>
+                    <p class="text-sm font-semibold text-gray-700">ফাইল নির্বাচন করতে ক্লিক করুন অথবা ড্র্যাগ করে এখানে ছাড়ুন</p>
+                    <p class="text-xs text-gray-500 mt-1">MP3, WAV, M4A, AAC, OGG ফরম্যাট (একাধিক অডিও একসঙ্গে নির্বাচন সম্ভব)</p>
+                    <input type="file" id="audioFileInput" accept="audio/*" multiple class="hidden" onchange="handleAudioSelect(event)">
+                </div>
+
+                <!-- Selected Audio Files List with Playable Audio Previews -->
+                <div id="fileListContainer" class="hidden mt-4 bg-gray-50 rounded-xl p-4 border border-gray-200">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="text-xs font-bold text-gray-700 flex items-center gap-1.5">
+                            <i class="fa-solid fa-list-check text-red-600"></i> আপলোড করা ফাইলসমূহ (<span id="fileCount">0</span>):
+                        </span>
+                        <button type="button" onclick="clearAllFiles()" class="text-xs text-red-600 hover:underline">সব মুছে ফেলুন</button>
+                    </div>
+                    <div id="fileList" class="space-y-3 max-h-60 overflow-y-auto custom-scrollbar">
+                        <!-- Dynamic File & Audio Player Cards -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mode Selector -->
+            <div class="mb-6">
+                <label class="block text-sm font-bold text-gray-800 mb-2">
+                    🎯 অ্যানালিসিস মোড বাছাই করুন:
+                </label>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <label class="border-2 border-gray-200 rounded-xl p-3.5 flex items-start space-x-3 cursor-pointer hover:border-red-300 transition-all bg-white relative hover:shadow-sm">
+                        <input type="radio" name="analysisMode" value="single" checked class="mt-1 text-red-600 focus:ring-red-500">
+                        <div>
+                            <div class="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                                <i class="fa-solid fa-clipboard-check text-red-600"></i>
+                                <span>1. QA Audit & Scorecard</span>
+                            </div>
+                            <p class="text-[11px] text-gray-500 mt-0.5">কলের প্রতিটি প্যারামিটারে নম্বর, ভুল তথ্য ও ক্রিটিক্যাল এরর (CE) শনাক্তকরণ।</p>
+                        </div>
+                    </label>
+
+                    <label class="border-2 border-gray-200 rounded-xl p-3.5 flex items-start space-x-3 cursor-pointer hover:border-red-300 transition-all bg-white hover:shadow-sm">
+                        <input type="radio" name="analysisMode" value="voice" class="mt-1 text-red-600 focus:ring-red-500">
+                        <div>
+                            <div class="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                                <i class="fa-solid fa-comments text-blue-600"></i>
+                                <span>2. Customer Objections & VOC</span>
+                            </div>
+                            <p class="text-[11px] text-gray-500 mt-0.5">গ্রাহকের সাইকোলজি, না কেনার মূল আপত্তি ও ভয়েস অফ কাস্টমার অ্যানালিসিস।</p>
+                        </div>
+                    </label>
+
+                    <label class="border-2 border-gray-200 rounded-xl p-3.5 flex items-start space-x-3 cursor-pointer hover:border-red-300 transition-all bg-white hover:shadow-sm">
+                        <input type="radio" name="analysisMode" value="coaching" class="mt-1 text-red-600 focus:ring-red-500">
+                        <div>
+                            <div class="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                                <i class="fa-solid fa-user-graduate text-emerald-600"></i>
+                                <span>3. Advisor Pitch & Coaching</span>
+                            </div>
+                            <p class="text-[11px] text-gray-500 mt-0.5">এডভাইসরের টোন, কনফিডেন্স ও বিকল্প স্ক্রিপ্ট সংশোধনের ট্রেইনিং।</p>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Action Button -->
+            <button id="analyzeBtn" onclick="startAnalysis()" class="w-full bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-bold py-3.5 px-6 rounded-xl shadow-md hover:shadow-red-200/80 transition-all flex items-center justify-center space-x-2 text-sm sm:text-base">
+                <i class="fa-solid fa-microchip"></i>
+                <span>কল প্রসেস ও AI অডিট শুরু করুন</span>
+            </button>
+        </div>
+
+        <!-- Loading Progress Indicator -->
+        <div id="loadingIndicator" class="hidden bg-white rounded-2xl p-8 border border-gray-200 shadow-sm text-center mb-8">
+            <div class="inline-flex items-center justify-center w-12 h-12 bg-red-100 text-red-600 rounded-full mb-4 animate-bounce">
+                <i class="fa-solid fa-headset text-2xl"></i>
+            </div>
+            <h3 class="text-lg font-bold text-gray-800">10MS AI অডিট ইঞ্জিন কাজ করছে...</h3>
+            <p id="loadingStatusText" class="text-xs text-gray-500 mt-1.5">অডিও প্রসেস করা হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...</p>
+            <div class="w-full max-w-xs mx-auto bg-gray-200 h-1.5 rounded-full mt-4 overflow-hidden">
+                <div id="loadingProgressBar" class="bg-red-600 h-full w-1/4 animate-pulse rounded-full"></div>
+            </div>
+        </div>
+
+        <!-- Output Report Container -->
+        <div id="outputContainer" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8 mb-8">
+            
+            <!-- Output Header Actions -->
+            <div class="flex flex-wrap items-center justify-between gap-4 pb-5 mb-6 border-b border-gray-200">
+                <div>
+                    <h2 class="text-xl font-bold text-gray-900 flex items-center gap-2">
+                        <i class="fa-solid fa-file-contract text-red-600"></i> কল অডিট ও কোচিং রিপোর্ট
+                    </h2>
+                    <p class="text-xs text-gray-500 mt-0.5">১০ মিনিট স্কুল স্ট্যান্ডার্ডে জেনারেটেড রিপোর্ট</p>
+                </div>
+
+                <!-- Export Buttons -->
+                <div class="flex flex-wrap items-center gap-2">
+                    <button onclick="exportToPDF()" class="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-700 hover:bg-red-100 rounded-lg text-xs font-bold transition-all border border-red-200">
+                        <i class="fa-solid fa-file-pdf text-red-600"></i> PDF ডাউনলোড
+                    </button>
+                    <button onclick="exportToWord()" class="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-xs font-bold transition-all border border-blue-200">
+                        <i class="fa-solid fa-file-word text-blue-600"></i> DOC (Word) ডাউনলোড
+                    </button>
+                    <button onclick="copyReportToClipboard()" class="inline-flex items-center gap-1.5 px-3 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-xs font-bold transition-all border border-gray-300">
+                        <i class="fa-solid fa-copy text-gray-600"></i> কপি
+                    </button>
+                    <button onclick="window.print()" class="inline-flex items-center gap-1.5 px-3 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-xs font-bold transition-all border border-gray-300">
+                        <i class="fa-solid fa-print text-gray-600"></i> প্রিন্ট
+                    </button>
+                </div>
+            </div>
+
+            <!-- Report Content Render Zone -->
+            <div id="reportContent" class="prose">
+                <!-- AI Output Rendered Here -->
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-900 text-gray-400 text-xs py-5 text-center mt-auto border-t border-gray-800">
+        <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-2">
+            <div>
+                <strong>10 Minute School</strong> Quality Assurance & Customer Experience Operations
+            </div>
+            <div class="text-gray-500">
+                Powered by Your Own AI API Key — Gemini, OpenAI & More
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        let selectedAudioFiles = [];
+        let previewObjectUrls = [];
+        let currentUser = null;
+
+        // Official Default Scorecard Template
+        const defaultQAScorecard = `১. Greetings (৫ নম্বর)
+- Greetings (২)
+- Permission (২)
+- Timely (১)
+
+২. Profiling (২০ নম্বর)
+- Student Inquiry (৫)
+- Active Listening (৫)
+- Relevant Questioning (৫)
+- Feedback (৫)
+
+৩. Advising (২০ নম্বর)
+- Personalized Advice (১০)
+- Clarity (৫)
+- Magic Words (৫)
+
+৪. Product Pitch (২৫ নম্বর)
+- Features (৫)
+- Personalization (৫)
+- Benefits (৫)
+- Pricing Clarity (৫)
+- Confidence (৫)
+
+৫. Soft Skills (১৫ নম্বর)
+- Rudeness, Hurriedness, Enthusiasm, Interruption, Accent, Empathy (১৫)
+
+৬. CRM Input (১০ নম্বর)
+- Data Accuracy & Remarks (১০)
+
+৭. Closing (৫ নম্বর)
+- Purchase Guideline (৩)
+- Standard Closing (২)
+
+CRITICAL ERRORS (CE - Zero Score Rule):
+যদি নিচের যেকোনো একটি Critical Error পাওয়া যায়, তবে মোট অর্জিত নম্বর সরাসরি 0 (Zero) হবে:
+- Wrong info (ভুল তথ্য)
+- Rudeness (অশিষ্ট আচরণ)
+- False promise (মিথ্যা প্রতিশ্রুতি)
+- Wrong guidance (ভুল দিকনির্দেশনা)
+- Broken callback (কথা দিয়ে কলব্যাক না করা)`;
+
+        // Sample Product Brief Demo Data
+        const sampleProductBrief = `কোর্সের নাম: HSC 26 অনলাইন ব্যাচ (বিজ্ঞান বিভাগ)
+রেগুলার কোর্স ফি: ৬,০০০ টাকা
+বর্তমান ডিসকাউন্ট অফার: ৪,৫০০ টাকা (প্রোমো কোড: HSC26SPECIAL)
+অফারের শেষ তারিখ: আগামী ৩০শে আগস্ট
+কোর্সের সুযোগ-সুবিধা:
+১. সম্পূর্ণ লাইভ ক্লাস (পদার্থ, রসায়ন, গণিত, জীববিজ্ঞান, বাংলা, ইংরেজি, ICT)
+২. প্রতিটি ক্লাসের পর লেকচার শিট PDF পাওয়া যাবে।
+৩. চ্যাপ্টার শেষ হলে মডেল টেস্ট ও লাইভ ডাউট সলভিং ক্লাসের সুবিধা।
+৪. রেকর্ড প্লেব্যাক যেকোনো সময় দেখা যাবে (কোর্সের মেয়াদ ২ বছর)।
+রিফান্ড পলিসি: ক্লাস শুরুর প্রথম ৭ দিনের মধ্যে অপছন্দ হলে ১০০% মানি ব্যাক গ্যারান্টি।`;
+
+        async function initializeAuth() {
+            document.getElementById('loginForm').addEventListener('submit', handleLogin);
+            document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+            try {
+                const response = await fetch('/api/session', { credentials: 'same-origin' });
+                if (response.ok) {
+                    const data = await response.json();
+                    setAuthenticatedUser(data.user);
+                }
+            } catch (error) {
+                showLoginError('সার্ভারের সাথে সংযোগ করা যাচ্ছে না।');
+            }
+        }
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            const button = document.getElementById('loginBtn');
+            const error = document.getElementById('loginError');
+            button.disabled = true;
+            button.textContent = 'যাচাই করা হচ্ছে...';
+            error.classList.add('hidden');
+            try {
+                const form = new FormData(event.target);
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: form.get('email'), password: form.get('password') })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || 'লগইন ব্যর্থ হয়েছে।');
+                setAuthenticatedUser(data.user);
+                event.target.reset();
+            } catch (loginError) {
+                showLoginError(loginError.message);
+            } finally {
+                button.disabled = false;
+                button.textContent = 'লগইন';
+            }
+        }
+
+        function showLoginError(message) {
+            const error = document.getElementById('loginError');
+            error.textContent = message;
+            error.classList.remove('hidden');
+        }
+
+        function setAuthenticatedUser(user) {
+            currentUser = user;
+            document.getElementById('authOverlay').classList.add('hidden');
+            const badge = document.getElementById('currentUserBadge');
+            badge.textContent = `${user.name || user.email} · ${user.email}`;
+            badge.classList.remove('hidden');
+            document.getElementById('logoutBtn').classList.remove('hidden');
+            const providerSelect = document.getElementById('aiProviderSelect');
+            Array.from(providerSelect.options).forEach(option => {
+                option.disabled = !user.providers.includes(option.value);
+            });
+            if (providerSelect.selectedOptions[0]?.disabled) {
+                const available = user.providers[0];
+                if (available) providerSelect.value = available;
+            }
+        }
+
+        async function handleLogout() {
+            await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+            currentUser = null;
+            selectedAudioFiles = [];
+            renderFileList();
+            document.getElementById('reportContent').textContent = '';
+            document.getElementById('outputContainer').classList.add('hidden');
+            document.getElementById('currentUserBadge').classList.add('hidden');
+            document.getElementById('logoutBtn').classList.add('hidden');
+            document.getElementById('authOverlay').classList.remove('hidden');
+        }
+
+        // Initialize Scorecard Default
+        document.getElementById('customQAParameters').value = defaultQAScorecard;
+        initializeAuth();
+
+        function toggleSettingsPanel() {
+            const panel = document.getElementById('settingsPanel');
+            const chevron = document.getElementById('settingsChevron');
+            panel.classList.toggle('hidden');
+            chevron.classList.toggle('rotate-180');
+        }
+
+        function toggleCustomQATextarea() {
+            const checkbox = document.getElementById('useCustomQA');
+            const textarea = document.getElementById('customQAParameters');
+            if (checkbox.checked) {
+                textarea.disabled = false;
+                textarea.classList.remove('bg-gray-50', 'text-gray-400');
+                textarea.classList.add('bg-white', 'text-gray-800');
+            } else {
+                textarea.disabled = true;
+                textarea.classList.add('bg-gray-50', 'text-gray-400');
+                textarea.classList.remove('bg-white', 'text-gray-800');
+            }
+        }
+
+        function loadSampleBrief() {
+            document.getElementById('productBriefText').value = sampleProductBrief;
+        }
+
+        function resetQAScorecard() {
+            document.getElementById('customQAParameters').value = defaultQAScorecard;
+        }
+
+        function handleBriefFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('productBriefText').value = e.target.result;
+            };
+            reader.readAsText(file);
+        }
+
+        function clearBriefText() {
+            document.getElementById('productBriefText').value = '';
+            document.getElementById('briefFileInput').value = '';
+        }
+
+        // Drag & Drop Handlers
+        const dropzone = document.getElementById('dropzone');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropzone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropzone.addEventListener(eventName, () => dropzone.classList.add('border-red-600', 'bg-red-100/60'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropzone.addEventListener(eventName, () => dropzone.classList.remove('border-red-600', 'bg-red-100/60'), false);
+        });
+
+        dropzone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = Array.from(dt.files).filter(f => f.type.startsWith('audio/'));
+            if (files.length > 0) {
+                addFiles(files);
+            }
+        });
+
+        function handleAudioSelect(event) {
+            const files = Array.from(event.target.files);
+            if (files.length > 0) {
+                addFiles(files);
+            }
+            event.target.value = '';
+        }
+
+        function addFiles(files) {
+            files.forEach(file => {
+                if (!selectedAudioFiles.some(f => f.name === file.name && f.size === file.size)) {
+                    selectedAudioFiles.push(file);
+                }
+            });
+            renderFileList();
+        }
+
+        function removeFile(index) {
+            selectedAudioFiles.splice(index, 1);
+            renderFileList();
+        }
+
+        function clearAllFiles() {
+            selectedAudioFiles = [];
+            renderFileList();
+        }
+
+        function renderFileList() {
+            const container = document.getElementById('fileListContainer');
+            const list = document.getElementById('fileList');
+            const count = document.getElementById('fileCount');
+
+            previewObjectUrls.forEach(url => URL.revokeObjectURL(url));
+            previewObjectUrls = [];
+
+            count.textContent = selectedAudioFiles.length;
+
+            if (selectedAudioFiles.length === 0) {
+                container.classList.add('hidden');
+                list.innerHTML = '';
+                return;
+            }
+
+            container.classList.remove('hidden');
+            list.innerHTML = selectedAudioFiles.map((file, idx) => {
+                const audioUrl = URL.createObjectURL(file);
+                previewObjectUrls.push(audioUrl);
+                const safeName = escapeHtml(file.name);
+                const safeType = escapeHtml(file.type || 'audio/mp3');
+                return `
+                <div class="p-3 bg-white rounded-xl border border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                    <div class="flex items-center space-x-3 truncate">
+                        <div class="w-9 h-9 bg-red-50 text-red-600 rounded-lg flex items-center justify-center shrink-0">
+                            <i class="fa-solid fa-music text-sm"></i>
+                        </div>
+                        <div class="truncate">
+                            <p class="text-xs font-bold text-gray-800 truncate">${safeName}</p>
+                            <p class="text-[10px] text-gray-400 font-medium">${(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <audio controls class="h-8 w-48 sm:w-64 rounded-md">
+                            <source src="${audioUrl}" type="${safeType}">
+                            Your browser does not support audio playback.
+                        </audio>
+                        <button type="button" onclick="removeFile(${idx})" class="text-gray-400 hover:text-red-600 p-1.5 transition-colors">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+            }).join('');
+        }
+
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>'"]/g, character => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            }[character]));
+        }
+
+        function loadDemoData() {
+            loadSampleBrief();
+            alert('ডেমো তথ্য সফলভাবে লোড করা হয়েছে! এখন আপনার একটি অডিও ফাইল দিয়ে "কল প্রসেস ও AI অডিট শুরু করুন" বোতামে চাপ দিন।');
+        }
+
+        function getPromptText(mode, productBrief, customQA, audioCount) {
+            let briefSection = productBrief ? `\n\nOFFICIAL PRODUCT BRIEF / FACT SHEET (যাচাইয়ের মূল ডকুমেন্ট):\n"""\n${productBrief}\n"""\n` : '';
+            let activeQAScorecard = customQA || defaultQAScorecard;
+            let qaSection = `\n\nEVALUATION QA SCORECARD PARAMETERS & WEIGHTS:\n"""\n${activeQAScorecard}\n"""\n`;
+
+            if (mode === 'single') {
+                return `You are a world-class Quality Assurance (QA) Manager and Call Evaluator for 10 Minute School.
+Listen to the audio recording(s) carefully and create an exhaustive Call Quality Audit & Scorecard Report in BANGLA (বাংলা).
+${briefSection}${qaSection}
+
+CRITICAL ERROR (CE) STRICT RULE:
+- Check for Critical Errors (Wrong info, Rudeness, False promise, Wrong guidance, Broken callback).
+- IF ANY CRITICAL ERROR (CE) IS TRIGGERED, THE FINAL TOTAL SCORE MUST BE INSTANTLY SET TO 0 OUT OF 100 (CRITICAL ERROR CASE - ZERO SCORE), REGARDLESS OF MARKS IN OTHER PARAMETERS!
+
+TIMESTAMP REQUIREMENT (বাধ্যতামূলক):
+- প্রতিটি পয়েন্ট, ভুল, বক্তব্য বা অডিটের উদাহরণের সাথে রেকর্ডিংয়ের নির্দিষ্ট সময় (Timestamp - e.g., [01:25], [04:10]) স্পষ্ট উল্লেখ করুন।
+
+Format the response using clean Markdown headers, bullet points, and tables. Structure:
+
+# 📊 10 Minute School - QA Audit & Call Scorecard Report
+
+## ১. কলের সংক্ষিপ্ত তথ্য (Call Summary)
+- **বিশ্লেষণকৃত কল রেকর্ডিং সংখ্যা:** ${audioCount}টি
+- **কল বিষয়বস্তু:**
+- **ক্লায়েন্ট টাইপ ও চাহিদা:**
+- **কলের স্থায়িত্বকাল ও টোন:**
+
+## ২. প্রোডাক্ট ফ্যাক্ট-চেক ও ক্রিটিক্যাল এরর অডিট (Product Fact-Check & Critical Error Audit)
+- প্রোডাক্ট ব্রিফ অনুযায়ী তথ্য সঠিকভাবে দেওয়া হয়েছে কিনা চেক করুন (টাইমস্ট্যাম্প সহ [MM:SS])।
+- কোনো **Critical Error (CE)** যেমন: Wrong info, Rudeness, False promise, Wrong guidance, বা Broken callback পাওয়া গেছে কিনা তা স্পষ্ট উল্লেখ করুন (টাইমস্ট্যাম্প সহ)।
+- **CE Alert:** (যদি CE থাকে, তবে লিখুন: "🚨 Critical Error Detected - Overall Call Score is 0")
+
+## ৩. QA স্কোরকার্ড ও স্কোর ব্রেকডাউন (QA Scorecard Breakdown)
+একটি সুন্দর বাংলা মার্জিনযুক্ত টেবিল তৈরি করুন:
+| প্যারামিটার | সর্বোচ্চ নম্বর | অর্জিত নম্বর | কাটা নম্বর | টাইমস্ট্যাম্প [MM:SS] | নম্বর কাটার বিবরণ ও সংক্ষেপ |
+(উপরে উল্লিখিত ১ থেকে ৭ পর্যন্ত প্রতিটি প্যারামিটার ও সাব-প্যারামিটারের মার্কিং আলাদা লাইন/সারি করে ব্রেকডাউন দিন)
+- **সর্বমোট নম্বর (Total Score):** X / 100 (যদি CE থাকে তবে অবশ্যই 0 / 100 হবে)
+
+## ৪. 🔻 মার্ক কাটার বিস্তারিত কারণ ও বিচার বিশ্লেষণ (Deduction Justification)
+প্রতিটি প্যারামিটারে নম্বর কাটার জন্য নিচের বিষয়গুলো বিশদ ব্যাখ্যা করুন:
+- **প্রত্যাশিত মানদণ্ড (Expected Standard):**
+- **এডভাইসরের ভুল/ঘাটতি (Observed Gap) & টাইমস্ট্যাম্প ([MM:SS]):**
+- **কাটা নম্বরের যৌক্তিকতা (Justification):**
+
+## ৫. এডভাইসরের ভালো দিকসমূহ (Strengths / Pros)
+- এডভাইসরের ৩-৪টি প্রশংসনীয় দিক (টাইমস্ট্যাম্প সহ [MM:SS])।
+
+## ৬. ভুল Approach বনাম সঠিক Approach (Script Correction)
+- **ভুল বলা বাক্য/শব্দ [টাইমস্ট্যাম্প]:** "..."
+- **উত্তম বিকল্প বাক্য:** "..."
+
+## ৭. অ্যাকশনেবল পরামর্শ ও ফাইনাল পারফরম্যান্স রেটিং (Actionable Coaching & Final Rating)
+- কাজের মানোন্নয়নের জন্য ৩টি স্পষ্ট টিপস।
+- **Overall Status:** (Excellent / Good / Needs Training / 🚨 Critical Error Case - Score 0)`;
+            } 
+            else if (mode === 'voice') {
+                return `Act as a Customer Insights & Operations Analyst for 10 Minute School.
+Analyze the audio recording(s) and provide a Customer Voice, Objections & Barriers Report in BANGLA (বাংলা).
+${briefSection}
+
+IMPORTANT INSTRUCTIONS (বাধ্যতামূলক):
+1. রিপোর্টের শুরুতেই স্পষ্টভাবে উল্লেখ করুন যে **মোট কতটি (${audioCount}টি)** কল রেকর্ডিং বিশ্লেষণ করে এই ইনসাইট ও সামারি তৈরি করা হয়েছে।
+2. কাস্টমারের প্রতিটি পয়েন্ট, প্রশ্ন, ভীতি, আপত্তি বা উক্তির সাথে অডিও রেকর্ডিংয়ের সুনির্দিষ্ট টাইমস্ট্যাম্প (Timestamp - [MM:SS] বা মিনিট:সেকেন্ড, একাধিক কল থাকলে যেমন "কল ১ [02:15]") উল্লেখ করুন।
+3. কলের মধ্যে এডভাইসর নিজের নাম বললে বা অন্য কোনোভাবে (যেমন গ্রিটিংসে, বা কাস্টমারের সম্বোধনে) বোঝা গেলে, প্রতিটি কল কোন এডভাইসর হ্যান্ডল করেছেন তা শনাক্ত করে উল্লেখ করুন। নাম বোঝা না গেলে "শনাক্ত করা যায়নি" লিখুন — কখনো নাম অনুমান করে বসাবেন না।
+
+Structure:
+# 🗣️ Customer Voice, Objections & Barriers Analysis
+
+## ১. ইনসাইট ডেটাসেট তথ্য (Dataset Summary)
+- **মোট বিশ্লেষণকৃত কল রেকর্ডিং:** ${audioCount}টি
+- **কল হ্যান্ডলকারী এডভাইসর(গণ):** (প্রতিটি কল অনুযায়ী এডভাইসরের নাম আলাদা করে লিখুন, যেমন "কল ১: [নাম/শনাক্ত করা যায়নি]")
+- **সামগ্রিক কাস্টমার সেন্টিমেন্ট:**
+
+## ২. কাস্টমার প্রোফাইল ও নিড (Customer Persona & Need - [MM:SS] টাইমস্ট্যাম্প সহ)
+## ৩. কাস্টমারের করা প্রশ্নসমূহ (Customer Questions Asked - [MM:SS] টাইমস্ট্যাম্প সহ)
+প্রতিটি রেকর্ডিংয়ে কাস্টমার যেসব প্রশ্ন করেছেন তা আলাদা আলাদা বুলেট পয়েন্টে টাইমস্ট্যাম্প সহ তালিকাভুক্ত করুন (একাধিক কল থাকলে "কল ১ [MM:SS]" ফরম্যাটে উল্লেখ করুন)। প্রশ্নগুলো যতটা সম্ভব কাস্টমারের নিজের ভাষাতেই তুলে ধরুন।
+## ৪. সিদ্ধান্ত না নেওয়ার মূল কারণসমূহ (Barriers to Purchase - [MM:SS] টাইমস্ট্যাম্প সহ)
+## ৫. প্রোডাক্ট বা সার্ভিস নিয়ে দ্বিধা/নেগেটিভ মনোভাব (Product Feedback - [MM:SS] টাইমস্ট্যাম্প সহ)
+## ৬. অবজেকশন হ্যান্ডলিং দক্ষতা মূল্যায়ন ও এডভাইসর ফিডব্যাক (Objection Handling Audit & Advisor Feedback - [MM:SS] টাইমস্ট্যাম্প সহ)
+প্রতিটি কলের এডভাইসরের নাম উল্লেখ করে তার অবজেকশন হ্যান্ডলিং দক্ষতা মূল্যায়ন করুন (যেমন "এডভাইসর [নাম] [MM:SS] এ...")।
+## ৭. কনভার্সন হার বাড়ানোর জন্য সুপারিশ (Actionable Sales Recommendations)`;
+            } 
+            else {
+                return `Act as a Senior Sales Communication Coach for 10 Minute School.
+Analyze the audio recording(s) and build a Personalized Advisor Development Plan in BANGLA (বাংলা).
+${briefSection}
+
+TIMESTAMP REQUIREMENT:
+- প্রতিটি পিচ, টোন পরিবর্তন বা ডায়ালগের উদাহরণের সাথে অডিওর সুনির্দিষ্ট টাইমস্ট্যাম্প ([MM:SS]) উল্লেখ করুন।
+
+Structure:
+# 🎯 Advisor Communication & Sales Coaching Report
+
+## ১. সেলিং টেকনিক ও পজিশনিং (Sales Pitch Audit - [MM:SS] টাইমস্ট্যাম্প সহ)
+## ২. কথা বলার ধরন, টোন ও কনফিডেন্স অ্যানালিসিস (Tone & Pitch Analysis - [MM:SS] টাইমস্ট্যাম্প সহ)
+## ৩. কাস্টমার লিসেনিং ও প্রোবিং স্কিল (Talk-to-Listen Ratio)
+## ৪. সরাসরি স্ক্রিপ্ট সংশোধন (Custom Script Coaching - ভুল উক্তি [MM:SS] vs সঠিক উক্তি)
+## ৫. এডভাইসরের জন্য সাপ্তাহিক টার্গেট ও গ্রোথ প্ল্যান (Weekly Goal)`;
+            }
+        }
+
+        async function convertFileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = error => reject(error);
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function callAiApi(provider, encodedAudioFiles, promptText) {
+            const response = await fetch('/api/analyze', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider, audioFiles: encodedAudioFiles, promptText })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (response.status === 401) {
+                await handleLogout();
+            }
+            if (!response.ok) throw new Error(data.error || 'AI বিশ্লেষণ ব্যর্থ হয়েছে।');
+            return data.report;
+        }
+
+        async function startAnalysis() {
+            if (selectedAudioFiles.length === 0) {
+                alert('অনুগ্রহ করে অন্তত একটি অডিও ফাইল আপলোড করুন।');
+                return;
+            }
+
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const outputContainer = document.getElementById('outputContainer');
+            const reportContent = document.getElementById('reportContent');
+            const statusText = document.getElementById('loadingStatusText');
+
+            const provider = document.getElementById('aiProviderSelect').value;
+            const productBrief = document.getElementById('productBriefText').value.trim();
+            const useCustomQA = document.getElementById('useCustomQA').checked;
+            const customQA = useCustomQA ? document.getElementById('customQAParameters').value.trim() : '';
+            const selectedMode = document.querySelector('input[name="analysisMode"]:checked').value;
+
+            if (!currentUser) {
+                alert('অনুগ্রহ করে প্রথমে লগইন করুন।');
+                return;
+            }
+
+            analyzeBtn.disabled = true;
+            analyzeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            loadingIndicator.classList.remove('hidden');
+            outputContainer.classList.add('hidden');
+
+            try {
+                statusText.textContent = `${selectedAudioFiles.length}টি অডিও এনকোড করা হচ্ছে...`;
+
+                const encodedAudioFiles = [];
+                for (let i = 0; i < selectedAudioFiles.length; i++) {
+                    const file = selectedAudioFiles[i];
+                    statusText.textContent = `অডিও প্রসেস করা হচ্ছে (${i + 1}/${selectedAudioFiles.length}): ${file.name}...`;
+                    const base64Data = await convertFileToBase64(file);
+                    encodedAudioFiles.push({
+                        mimeType: file.type || 'audio/mp3',
+                        name: file.name,
+                        data: base64Data
+                    });
+                }
+
+                statusText.textContent = '10MS AI অডিট ইঞ্জিন কল বিশ্লেষণ করছে...';
+                
+                const promptText = getPromptText(selectedMode, productBrief, customQA, selectedAudioFiles.length);
+                const aiResult = await callAiApi(provider, encodedAudioFiles, promptText);
+
+                // Use Marked.js for HTML parsing
+                const renderedReport = marked.parse(aiResult);
+                reportContent.innerHTML = window.DOMPurify
+                    ? DOMPurify.sanitize(renderedReport)
+                    : escapeHtml(aiResult).replace(/\n/g, '<br>');
+                outputContainer.classList.remove('hidden');
+                outputContainer.scrollIntoView({ behavior: 'smooth' });
+
+            } catch (error) {
+                alert(`ত্রুটি দেখা দিয়েছে:\n${error.message}`);
+            } finally {
+                analyzeBtn.disabled = false;
+                analyzeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        function exportToPDF() {
+            const element = document.getElementById('reportContent');
+            const opt = {
+                margin:       [0.5, 0.5, 0.5, 0.5],
+                filename:     `10MS_QA_Report_${new Date().toISOString().slice(0,10)}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2 },
+                jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+            };
+            html2pdf().set(opt).from(element).save();
+        }
+
+        function exportToWord() {
+            const reportHtml = document.getElementById('reportContent').innerHTML;
+            const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' "+
+                "xmlns:w='urn:schemas-microsoft-com:office:word' "+
+                "xmlns='http://www.w3.org/TR/REC-html40'>"+
+                "<head><meta charset='utf-8'><title>QA Report</title><style>"+
+                "body { font-family: 'Arial', sans-serif; }"+
+                "table { border-collapse: collapse; width: 100%; margin: 10px 0; }"+
+                "th, td { border: 1px solid #000; padding: 8px; font-size: 10pt; }"+
+                "th { background-color: #f2f2f2; }"+
+                "h1 { color: #dc2626; font-size: 16pt; }"+
+                "h2 { color: #1e40af; font-size: 13pt; }"+
+                "</style></head><body>";
+            const footer = "</body></html>";
+            const sourceHTML = header + reportHtml + footer;
+
+            const source = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(sourceHTML);
+            const fileDownload = document.createElement("a");
+            document.body.appendChild(fileDownload);
+            fileDownload.href = source;
+            fileDownload.download = `10MS_QA_Report_${new Date().toISOString().slice(0,10)}.doc`;
+            fileDownload.click();
+            document.body.removeChild(fileDownload);
+        }
+
+        function copyReportToClipboard() {
+            const content = document.getElementById('reportContent').innerText;
+            const textarea = document.createElement('textarea');
+            textarea.value = content;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            alert('রিপোর্টটি সফলভাবে ক্লিপবোর্ডে কপি করা হয়েছে!');
+        }
+    </script>
+</body>
+</html>

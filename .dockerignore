@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+npm-debug.log*
+*.json
+!package.json
+!package-lock.json
+test
+README.md

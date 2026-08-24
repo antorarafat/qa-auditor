@@ -1,0 +1,33 @@
+{
+  "name": "10ms-qa-audit-portal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "10 Minute School QA Auditor with sheet-backed access control",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "googleapis": "^155.0.0",
+    "helmet": "^8.1.0",
+    "dotenv": "^16.6.1",
+    "dompurify": "^3.2.6",
+    "lucide-react": "^0.468.0",
+    "marked": "^15.0.7",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "supertest": "^7.1.4",
+    "vite": "^6.0.7"
+  }
+}

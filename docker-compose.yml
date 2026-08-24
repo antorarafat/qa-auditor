@@ -1,0 +1,33 @@
+services:
+  qa-auditor:
+    build:
+      context: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      GEMINI_MODELS: gemini-3.6-flash
+      AI_CACHE_TTL_MS: 21600000
+      AI_CACHE_MAX_ENTRIES: 100
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google_service_account
+    secrets:
+      - google_service_account
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+secrets:
+  google_service_account:
+    file: ./arafat-alahe-403508-11c3d59ec795.json

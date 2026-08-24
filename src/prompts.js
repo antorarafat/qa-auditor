@@ -1,0 +1,8 @@
+export function getPromptText(mode, productBrief, customQA, audioCount) {
+  const brief = productBrief ? `\n\nOFFICIAL PRODUCT BRIEF / FACT SHEET:\n"""\n${productBrief}\n"""\n` : '';
+  const scorecard = customQA || 'Use the standard QA scorecard: Greetings, Profiling, Advising, Product Pitch, Soft Skills, CRM Input and Closing, totaling 100 points.';
+  const common = `\n${brief}\nEVALUATION QA SCORECARD:\n"""\n${scorecard}\n"""\n\nAnalyze the audio carefully and write the complete report in BANGLA (বাংলা). Include precise [MM:SS] timestamps for every observation. If Wrong info, Rudeness, False promise, Wrong guidance or Broken callback is found, set the final score to 0/100.`;
+  if (mode === 'voice') return `Act as a Customer Insights & Operations Analyst for 10 Minute School. Analyze ${audioCount} call recording(s) and produce a Bangla Customer Voice, Objections & Barriers Report.${common}\nInclude customer persona, questions, purchase barriers, product feedback, objection handling and actionable sales recommendations.`;
+  if (mode === 'coaching') return `Act as a Senior Sales Communication Coach for 10 Minute School. Analyze ${audioCount} call recording(s) and produce a Bangla Advisor Development Plan.${common}\nInclude sales pitch, tone, confidence, listening/probing, corrected scripts and a weekly growth plan.`;
+  return `Act as a world-class QA Manager and Call Evaluator for 10 Minute School. Analyze ${audioCount} call recording(s) and produce an exhaustive Bangla Call Quality Audit & Scorecard Report.${common}\nInclude call summary, fact-check and critical-error audit, a parameter-by-parameter score table, deduction justification, strengths, script corrections and final rating.`;
+}

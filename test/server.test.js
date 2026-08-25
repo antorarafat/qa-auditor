@@ -8,6 +8,7 @@ function fakeStore() {
     email: 'user@example.com',
     password: 'plain-password',
     name: 'Test User',
+    companyName: 'Robi',
     geminiKey: 'gemini-secret',
     openaiKey: 'openai-secret',
     usage: 0
@@ -132,7 +133,7 @@ test('logs in, analyzes with the matching provider key, and increments usage', a
   assert.deepEqual(login.body.user, {
     email: 'user@example.com',
     name: 'Test User',
-    companyName: '10 Minute School',
+    companyName: 'Robi',
     providers: ['gemini', 'openai']
   });
   assert.equal(JSON.stringify(login.body).includes('secret'), false);
@@ -152,6 +153,8 @@ test('logs in, analyzes with the matching provider key, and increments usage', a
   assert.equal(providers.calls[0].key, 'gemini-secret');
   assert.match(providers.calls[0].prompt, /Official product brief for PCMB/);
   assert.match(providers.calls[0].prompt, /Sheet QA scorecard/);
+  assert.match(providers.calls[0].prompt, /COMPANY NAME: "Robi"/);
+  assert.doesNotMatch(providers.calls[0].prompt, /10 Minute School/);
   assert.equal(store.users[0].usage, 1);
 
   const cached = await agent.post('/api/analyze').send(auditPayload());

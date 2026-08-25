@@ -12,7 +12,7 @@ const INDEX_PATH = path.join(ROOT, '10ms-qa-audit-portal.html');
 const DIST_DIR = path.join(ROOT, 'dist');
 const DIST_INDEX_PATH = path.join(DIST_DIR, 'index.html');
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash'];
+const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite'];
 const DEFAULT_OPENAI_MODELS = ['gpt-4o-audio-preview', 'gpt-4o-mini-audio-preview'];
 const DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_CACHE_MAX_ENTRIES = 100;
@@ -236,14 +236,16 @@ function createGoogleSheetStore(config = {}) {
   };
 }
 
-function buildPromptText(mode, productBrief, scorecard, audioCount) {
+function buildPromptText(mode, productBrief, scorecard, audioCount, companyName) {
+  const company = String(companyName || 'the configured company').replace(/\s+/g, ' ').trim().slice(0, 160);
+  const companyContext = `COMPANY NAME: "${company}"\nUse this exact company name throughout the report. Never substitute another organization or brand.`;
   const productContext = productBrief
     ? `\n\nOFFICIAL PRODUCT BRIEF / FACT SHEET:\n"""\n${productBrief}\n"""`
     : '\n\nNo product category or sub-category was selected. Perform a generic QA evaluation and do not assume product-specific facts.';
-  const common = `${productContext}\n\nEVALUATION QA SCORECARD:\n"""\n${scorecard}\n"""\n\nAnalyze the audio carefully and write the complete report in BANGLA (বাংলা). Include precise [MM:SS] timestamps for every observation. If Wrong info, Rudeness, False promise, Wrong guidance or Broken callback is found, set the final score to 0/100.`;
-  if (mode === 'voice') return `Act as a Customer Insights & Operations Analyst for 10 Minute School. Analyze ${audioCount} call recording(s) and produce a Bangla Customer Voice, Objections & Barriers Report.${common}\nInclude customer persona, questions, purchase barriers, product feedback, objection handling and actionable sales recommendations.`;
-  if (mode === 'coaching') return `Act as a Senior Sales Communication Coach for 10 Minute School. Analyze ${audioCount} call recording(s) and produce a Bangla Advisor Development Plan.${common}\nInclude sales pitch, tone, confidence, listening/probing, corrected scripts and a weekly growth plan.`;
-  return `Act as a world-class QA Manager and Call Evaluator for 10 Minute School. Analyze ${audioCount} call recording(s) and produce an exhaustive Bangla Call Quality Audit & Scorecard Report.${common}\nInclude call summary, fact-check and critical-error audit, a parameter-by-parameter score table, deduction justification, strengths, script corrections and final rating.`;
+  const common = `\n\n${companyContext}${productContext}\n\nEVALUATION QA SCORECARD:\n"""\n${scorecard}\n"""\n\nAnalyze the audio carefully and write the complete report in BANGLA (বাংলা). Include precise [MM:SS] timestamps for every observation. If Wrong info, Rudeness, False promise, Wrong guidance or Broken callback is found, set the final score to 0/100.`;
+  if (mode === 'voice') return `Act as a Customer Insights & Operations Analyst for ${company}. Analyze ${audioCount} call recording(s) and produce a Bangla Customer Voice, Objections & Barriers Report.${common}\nInclude customer persona, questions, purchase barriers, product feedback, objection handling and actionable sales recommendations.`;
+  if (mode === 'coaching') return `Act as a Senior Sales Communication Coach for ${company}. Analyze ${audioCount} call recording(s) and produce a Bangla Advisor Development Plan.${common}\nInclude sales pitch, tone, confidence, listening/probing, corrected scripts and a weekly growth plan.`;
+  return `Act as a world-class QA Manager and Call Evaluator for ${company}. Analyze ${audioCount} call recording(s) and produce an exhaustive Bangla Call Quality Audit & Scorecard Report.${common}\nInclude call summary, fact-check and critical-error audit, a parameter-by-parameter score table, deduction justification, strengths, script corrections and final rating.`;
 }
 
 function publicUser(user) {
@@ -599,7 +601,7 @@ function createApp(options = {}) {
       const productBrief = selectedProducts.map(item => `[${item.category} / ${item.subCategory}]\n${item.brief}`).join('\n\n');
       const scorecard = customScorecard || sheetScorecard;
       if (!scorecard) return res.status(503).json({ error: 'The QA scorecard is unavailable.' });
-      const promptText = buildPromptText(mode, productBrief, scorecard, audioFiles.length);
+      const promptText = buildPromptText(mode, productBrief, scorecard, audioFiles.length, user.companyName);
       const cacheKey = analysisCacheKey(user, provider, promptText, audioFiles);
       const cachedReport = analysisCache.get(cacheKey);
       if (cachedReport) return res.json({ report: cachedReport, cached: true });

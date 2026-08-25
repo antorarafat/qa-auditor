@@ -5,8 +5,8 @@ const path = require('node:path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
-const { google } = require('googleapis');
 const pipeline = require('./lib/audit-pipeline');
+const { createMongoStore } = require('./lib/mongo-store');
 
 const ROOT = __dirname;
 const INDEX_PATH = path.join(ROOT, '10ms-qa-audit-portal.html');
@@ -16,99 +16,15 @@ const TEMPLATE_DIR = process.env.TEMPLATE_DIR || path.join(ROOT, 'templates');
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash'];
 const DEFAULT_OPENAI_MODELS = ['gpt-4o-audio-preview', 'gpt-4o-mini-audio-preview'];
-const DEFAULT_GEMINI_DEADLINE_MS = 180 * 1000;
-const DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS = 170 * 1000;
+const DEFAULT_GEMINI_DEADLINE_MS = 10 * 60 * 1000;
+const DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS = 590 * 1000;
 const DEFAULT_GEMINI_RETRY_DELAY_MS = 15 * 1000;
 const DEFAULT_GEMINI_MAX_ROUNDS = 1;
 
 function envNumber(name, fallback) { const value = Number.parseInt(process.env[name] || '', 10); return Number.isFinite(value) && value > 0 ? value : fallback; }
 function envList(name, fallback) { const value = (process.env[name] || '').split(',').map(item => item.trim()).filter(Boolean); return value.length ? value : fallback; }
 function normalizeEmail(value) { return String(value || '').trim().toLowerCase(); }
-function normalizeHeader(value) { return String(value || '').trim().toLowerCase().replace(/\s+/g, '_'); }
 function safeEqual(left, right) { const a = Buffer.from(String(left || '')); const b = Buffer.from(String(right || '')); return a.length === b.length && crypto.timingSafeEqual(a, b); }
-function columnLetter(index) { let result = ''; for (let value = index + 1; value > 0; value = Math.floor((value - 1) / 26)) result = String.fromCharCode(65 + ((value - 1) % 26)) + result; return result; }
-
-function rowsToUsers(values) {
-  if (!Array.isArray(values) || !values.length) return [];
-  const headers = values[0].map(normalizeHeader);
-  const indexOf = name => headers.indexOf(normalizeHeader(name));
-  const emailIndex = indexOf('User Email');
-  const passwordIndex = indexOf('User Password');
-  const nameIndex = indexOf('User Name');
-  const geminiIndex = indexOf('GEMINI_API_KEY');
-  const openaiIndex = indexOf('OPENAI_API_KEY');
-  const usageIndex = indexOf('Usage');
-  const defaultParameterIndex = indexOf('Default QA Parameter');
-  const companyIndex = ['Company Name', 'Company', 'Organization'].map(indexOf).find(index => index >= 0);
-  if (emailIndex < 0 || passwordIndex < 0) throw new Error('The user sheet must contain User Email and User Password columns.');
-  return values.slice(1).map((row, offset) => ({
-    rowNumber: offset + 2, email: normalizeEmail(row[emailIndex]), password: String(row[passwordIndex] || ''),
-    name: String(row[nameIndex] || row[emailIndex] || '').trim(), companyName: String(row[companyIndex] || '').trim() || '10 Minute School',
-    geminiKey: String(row[geminiIndex] || '').trim(), openaiKey: String(row[openaiIndex] || '').trim(),
-    usage: usageIndex >= 0 ? Number.parseInt(row[usageIndex] || '0', 10) || 0 : 0, usageColumn: usageIndex,
-    defaultParameter: String(row[defaultParameterIndex] || '').trim(), defaultParameterColumn: defaultParameterIndex
-  })).filter(user => user.email);
-}
-
-function rowsToProductBriefs(values) {
-  if (!Array.isArray(values) || !values.length) return [];
-  const headers = values[0].map(normalizeHeader);
-  const categoryIndex = headers.indexOf('category');
-  const subCategoryIndex = headers.indexOf('sub-category') >= 0 ? headers.indexOf('sub-category') : headers.indexOf('sub_category');
-  const briefIndex = headers.indexOf('brief');
-  if (categoryIndex < 0 || subCategoryIndex < 0 || briefIndex < 0) throw new Error('The product brief sheet must contain Category, Sub-Category and Brief columns.');
-  return values.slice(1).map(row => ({ category: String(row[categoryIndex] || '').trim(), subCategory: String(row[subCategoryIndex] || '').trim(), brief: String(row[briefIndex] || '').trim() })).filter(item => item.category && item.subCategory && item.brief);
-}
-
-function groupProductOptions(products) {
-  const grouped = new Map();
-  for (const product of products) { if (!grouped.has(product.category)) grouped.set(product.category, []); if (!grouped.get(product.category).includes(product.subCategory)) grouped.get(product.category).push(product.subCategory); }
-  return Array.from(grouped, ([category, subCategories]) => ({ category, subCategories }));
-}
-
-function createGoogleSheetStore(config = {}) {
-  const spreadsheetId = config.spreadsheetId || process.env.GOOGLE_SHEETS_ID;
-  const sheetName = config.sheetName || process.env.GOOGLE_SHEETS_TAB || 'user';
-  const companySheetName = config.companySheetName || process.env.GOOGLE_SHEETS_COMPANY_TAB || 'company';
-  const productSheetName = config.productSheetName || process.env.GOOGLE_SHEETS_PRODUCT_TAB || 'product_brief';
-  const scorecardSheetName = config.scorecardSheetName || process.env.GOOGLE_SHEETS_SCORECARD_TAB || 'qa_scorecard';
-  const auditResultSheetName = config.auditResultSheetName || process.env.GOOGLE_SHEETS_AUDIT_RESULT_TAB || 'audit_result';
-  let sheetsClient;
-  const quoted = name => `'${name.replace(/'/g, "''")}'`;
-  function assertConfigured() { if (!spreadsheetId) throw new Error('GOOGLE_SHEETS_ID is not configured.'); }
-  function getClient() {
-    if (sheetsClient) return sheetsClient;
-    const authOptions = { scopes: ['https://www.googleapis.com/auth/spreadsheets'] };
-    if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) authOptions.credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-    else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) authOptions.keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-    sheetsClient = google.sheets({ version: 'v4', auth: new google.auth.GoogleAuth(authOptions) });
-    return sheetsClient;
-  }
-  async function readValues(range, valueRenderOption = 'UNFORMATTED_VALUE') { assertConfigured(); const response = await getClient().spreadsheets.values.get({ spreadsheetId, range, valueRenderOption }); return response.data.values || []; }
-  async function readUsers() { return rowsToUsers(await readValues(`${quoted(sheetName)}!A1:Z1000`)); }
-  async function readCompanyName() {
-    try { const values = await readValues(`${quoted(companySheetName)}!A1:B20`); if (!values.length) return null; const headers = values[0].map(normalizeHeader); const index = headers.indexOf(normalizeHeader('Company Name')); return String(index >= 0 ? values.slice(1).find(row => row[index])?.[index] : values[0][0] || '').trim() || null; }
-    catch (error) { console.error('Company tab lookup skipped:', error.message); return null; }
-  }
-  async function readProductBriefs() { return rowsToProductBriefs(await readValues(`${quoted(productSheetName)}!A1:C1000`, 'FORMATTED_VALUE')); }
-  async function readQaParameters() {
-    const values = await readValues(`${quoted(scorecardSheetName)}!A1:B1000`, 'FORMATTED_VALUE');
-    const parameters = values.slice(1).map(row => ({ name: String(row[0] || '').trim(), detail: String(row[1] || '').trim() })).filter(item => item.name);
-    const names = new Set();
-    for (const item of parameters) { if (names.has(item.name.toLowerCase())) throw new Error(`Duplicate QA parameter: ${item.name}.`); names.add(item.name.toLowerCase()); if (!item.detail) throw new Error(`QA parameter ${item.name} has no rubric text.`); }
-    if (!parameters.length) throw new Error('No QA parameters are configured.');
-    return parameters;
-  }
-  return {
-    async findByEmail(email) { const [users, companyName] = await Promise.all([readUsers(), readCompanyName()]); const user = users.find(item => item.email === normalizeEmail(email)) || null; if (user && companyName) user.companyName = companyName; return user; },
-    async getAuditConfiguration() { const [products, parameters] = await Promise.all([readProductBriefs(), readQaParameters()]); return { products: groupProductOptions(products), parameters: parameters.map(item => item.name) }; },
-    async getProductBriefs(categories = [], selections = []) { const products = await readProductBriefs(); if (selections.length) { const selected = new Set(selections.map(item => `${item.category}\0${item.subCategory}`)); return products.filter(item => selected.has(`${item.category}\0${item.subCategory}`)); } const set = new Set(categories); return products.filter(item => set.has(item.category)); },
-    async getQaParameter(name) { const parameters = await readQaParameters(); return parameters.find(item => item.name.toLowerCase() === String(name || '').trim().toLowerCase()) || null; },
-    async saveDefaultParameter(email, parameter) { const users = await readUsers(); const user = users.find(item => item.email === normalizeEmail(email)); if (!user || user.defaultParameterColumn < 0) throw new Error('Default QA Parameter column is unavailable.'); const cell = `${columnLetter(user.defaultParameterColumn)}${user.rowNumber}`; await getClient().spreadsheets.values.update({ spreadsheetId, range: `${quoted(sheetName)}!${cell}`, valueInputOption: 'USER_ENTERED', requestBody: { values: [[parameter]] } }); return true; },
-    async appendAuditResults(rows) { if (!rows.length) return 0; await getClient().spreadsheets.values.append({ spreadsheetId, range: `${quoted(auditResultSheetName)}!A:K`, valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', requestBody: { values: rows } }); return rows.length; },
-    async incrementUsage(email) { const users = await readUsers(); const user = users.find(item => item.email === normalizeEmail(email)); if (!user || user.usageColumn < 0) return false; const cell = `${columnLetter(user.usageColumn)}${user.rowNumber}`; await getClient().spreadsheets.values.update({ spreadsheetId, range: `${quoted(sheetName)}!${cell}`, valueInputOption: 'USER_ENTERED', requestBody: { values: [[user.usage + 1]] } }); return true; }
-  };
-}
 
 function publicUser(user) { return { email: user.email, name: user.name, companyName: user.companyName || '10 Minute School', providers: [user.geminiKey ? 'gemini' : null, user.openaiKey ? 'openai' : null].filter(Boolean) }; }
 function createAnalysisCache(config = {}) {
@@ -117,6 +33,11 @@ function createAnalysisCache(config = {}) {
   return { get(key) { prune(); const entry = entries.get(key); if (!entry) return null; entries.delete(key); entries.set(key, entry); return entry.value; }, set(key, value) { prune(); entries.set(key, { value, expiresAt: Date.now() + ttlMs }); prune(); }, size() { prune(); return entries.size; } };
 }
 function analysisCacheKey(user, provider, prompt, files) { const hash = crypto.createHash('sha256').update(`${user.email}\0${provider}\0${prompt}`); for (const file of files) hash.update(`\0${file.name}\0${file.mimeType}\0${file.data}`); return hash.digest('hex'); }
+function analysisDedupeKey(email, input, files) {
+  const hash = crypto.createHash('sha256').update(JSON.stringify({ email: normalizeEmail(email), provider: input.provider, mode: input.mode, parameter: input.parameter, categories: input.categories, selections: input.selections }));
+  for (const file of files) hash.update(`\0${file.name}\0${file.mimeType}\0${file.sha256}`);
+  return hash.digest('hex');
+}
 function parseCookies(header) { return String(header || '').split(';').reduce((result, item) => { const at = item.indexOf('='); if (at >= 0) result[item.slice(0, at).trim()] = decodeURIComponent(item.slice(at + 1).trim()); return result; }, {}); }
 function createSessionManager() {
   const sessions = new Map(); const prune = () => { const now = Date.now(); for (const [token, session] of sessions) if (session.expiresAt <= now) sessions.delete(token); };
@@ -125,7 +46,7 @@ function createSessionManager() {
 function setSessionCookie(res, token, secure) { res.setHeader('Set-Cookie', `qa_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${secure ? '; Secure' : ''}`); }
 function clearSessionCookie(res, secure) { res.setHeader('Set-Cookie', `qa_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure ? '; Secure' : ''}`); }
 function isSameOrigin(req, allowedOrigins) { const origin = req.get('origin'); return !origin || (allowedOrigins.length ? allowedOrigins.includes(origin) : origin === `${req.protocol}://${req.get('host')}`); }
-function validateAudioFiles(files) { if (!Array.isArray(files) || !files.length) throw new Error('Upload at least one audio file.'); return files.map(file => { if (!file || typeof file.data !== 'string' || !String(file.mimeType || '').startsWith('audio/')) throw new Error('Only audio files are supported.'); const bytes = Math.ceil(Buffer.byteLength(file.data, 'base64')); if (!Number.isFinite(bytes) || bytes <= 0) throw new Error('Invalid audio data.'); return { data: file.data, mimeType: String(file.mimeType), name: String(file.name || 'audio').slice(0, 200) }; }); }
+function validateAudioFiles(files) { if (!Array.isArray(files) || !files.length) throw new Error('Upload at least one audio file.'); return files.map(file => { if (!file || typeof file.data !== 'string' || !String(file.mimeType || '').startsWith('audio/')) throw new Error('Only audio files are supported.'); const buffer = Buffer.from(file.data, 'base64'); if (!buffer.length) throw new Error('Invalid audio data.'); return { data: file.data, mimeType: String(file.mimeType), name: String(file.name || 'audio').slice(0, 200), size: buffer.length, sha256: crypto.createHash('sha256').update(buffer).digest('hex') }; }); }
 function parseJsonText(text) { const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''); try { return JSON.parse(cleaned); } catch { throw new Error('The AI returned malformed structured JSON.'); } }
 
 function providerError(message, errorCode, retryable, providerStatus, attempts = []) {
@@ -149,7 +70,7 @@ function safeProviderFailure(error) {
     invalid_response: 'The AI returned an invalid report. Please run the call again.',
     request_rejected: 'The AI service rejected this request.'
   };
-  return { error: messages[code] || 'The AI analysis could not be completed.', errorCode: code, retryable: error?.retryable === true };
+  return { error: messages[code] || 'The AI analysis could not be completed.', errorCode: code, retryable: error?.retryable === true, retryAfterMs: Number(error?.retryAfterMs || 0) || undefined };
 }
 
 function retryAfterMilliseconds(response) {
@@ -234,9 +155,11 @@ function createProviderClient(config = {}) {
           continue;
         }
         if (response.status === 429) {
-          requestedRetryAfterMs = Math.max(requestedRetryAfterMs, retryAfterMilliseconds(response));
+          const retryAfterMs = retryAfterMilliseconds(response);
+          requestedRetryAfterMs = Math.max(requestedRetryAfterMs, retryAfterMs);
           attempts.push({ model, round: round + 1, errorCode: 'rate_limited', status: response.status });
           lastFailure = providerError('Gemini quota or rate limit exceeded.', 'rate_limited', true, response.status, attempts);
+          lastFailure.retryAfterMs = retryAfterMs;
           continue;
         }
         if (response.status >= 500) {
@@ -340,11 +263,11 @@ CALL PURPOSE AND PARAMETER APPLICABILITY:
 - Apply the same fairness principle to any other demonstrably irrelevant row. Do not invent an exemption when the call purpose is unclear.
 
 PRODUCT FACT CHECK — MANDATORY WHEN PRODUCT CONTEXT IS SELECTED:
-- Treat the selected Sheet facts below as the authoritative source.
+- Treat the selected product facts below as the authoritative source.
 - Identify every concrete product claim made in the call. For each claim, cite [MM:SS], state the advisor's claim, the matching official fact, and verdict: Correct / Incorrect / Not verifiable.
 - Missing product discussion is not automatically an error when product discussion was outside the call purpose.
 - If an advisor claim contradicts an official selected fact, explain it clearly and evaluate Wrong information / Wrong guidance CE according to the live CE rules.
-- If no product was selected, explicitly write that product-specific verification was unavailable; never pretend a Sheet fact was checked.
+- If no product was selected, explicitly write that product-specific verification was unavailable; never pretend an official product fact was checked.
 
 SELECTED OFFICIAL PRODUCT FACTS:
 ${selectedFacts}
@@ -388,67 +311,152 @@ function markdownRunSummary(results) {
 function voicePrompt(company, products, count) { return `Analyze ${count} calls for ${company} as a Customer Insights analyst. Return one Bangla summary grounded only in the recordings. Include precise timestamps where useful. This is not a QA scorecard and must not score calls.\n\nPRODUCT CONTEXT:\n${productContext(products)}`; }
 function coachingPrompt(company, rubric, products, count) { return `Analyze ${count} calls for ${company} as a senior sales communication coach. Return one Bangla coaching summary with precise [MM:SS] timestamps. Use the selected ${rubric.name} rubric only as coaching context; do not produce scores.\n\nPRODUCT CONTEXT:\n${productContext(products)}\n\nLIVE RUBRIC:\n${rubric.source}`; }
 
+function normalizeAnalysisInput(body) {
+  const provider = String(body?.provider || '').toLowerCase();
+  const mode = String(body?.mode || 'single');
+  if (!['gemini', 'openai'].includes(provider)) throw Object.assign(new Error('Unsupported AI provider.'), { statusCode: 400 });
+  if (!['single', 'voice', 'coaching'].includes(mode)) throw Object.assign(new Error('Unsupported analysis mode.'), { statusCode: 400 });
+  const categories = [...new Set((Array.isArray(body?.categories) ? body.categories : []).map(item => String(item || '').trim()).filter(Boolean))];
+  const selections = (Array.isArray(body?.productSelections) ? body.productSelections : []).map(item => ({ category: String(item?.category || '').trim(), subCategory: String(item?.subCategory || '').trim() })).filter(item => item.category && item.subCategory);
+  if (categories.length > 50 || selections.length > 200 || categories.some(item => item.length > 300) || selections.some(item => item.category.length > 300 || item.subCategory.length > 500)) throw Object.assign(new Error('Invalid product selection.'), { statusCode: 400 });
+  return { provider, mode, parameter: String(body?.parameter || '').trim(), categories, selections };
+}
+
+async function prepareAnalysis(dataStore, user, input, audioFiles, templateDir) {
+  const apiKey = input.provider === 'gemini' ? user.geminiKey : user.openaiKey;
+  if (!apiKey) throw Object.assign(new Error(`No ${input.provider} API key is configured for this account.`), { statusCode: 400 });
+  const products = await dataStore.getProductBriefs(input.categories, input.selections);
+  if ((input.categories.length || input.selections.length) && !products.length) throw Object.assign(new Error('The selected product briefs were not found.'), { statusCode: 400 });
+  let parameter = ''; let rubric = null;
+  if (input.mode !== 'voice') {
+    if (!input.parameter) throw Object.assign(new Error('Choose a QA parameter.'), { statusCode: 400 });
+    const entry = await dataStore.getQaParameter(input.parameter);
+    if (!entry) throw Object.assign(new Error('The selected QA parameter is no longer available.'), { statusCode: 400 });
+    rubric = pipeline.parseQaRubric(entry.name, entry.detail); parameter = entry.name;
+  }
+  const templateKeys = input.mode === 'single' ? ['qaSummary'] : [input.mode];
+  const templates = pipeline.loadAndValidateTemplates(templateDir, templateKeys);
+  const identity = input.mode === 'single'
+    ? `qa-markdown\n${user.companyName}\n${parameter}\n${rubric.source}\n${productContext(products)}\n${templates.qaSummary}`
+    : `${input.mode}\n${user.companyName}\n${parameter}\n${rubric?.source || ''}\n${productContext(products)}\n${templates[input.mode]}`;
+  return { apiKey, products, parameter, rubric, templates, cacheKey: analysisCacheKey(user, input.provider, identity, audioFiles) };
+}
+
+async function cacheGet(dataStore, memoryCache, key) { return dataStore.getCachedAnalysis ? dataStore.getCachedAnalysis(key) : memoryCache.get(key); }
+async function cacheSet(dataStore, memoryCache, key, result, ttlMs) { return dataStore.setCachedAnalysis ? dataStore.setCachedAnalysis(key, result, ttlMs) : memoryCache.set(key, result); }
+
+async function runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, input, audioFiles) {
+  const prepared = await prepareAnalysis(dataStore, user, input, audioFiles, templateDir);
+  const cached = await cacheGet(dataStore, memoryCache, prepared.cacheKey);
+  if (cached) return { ...cached, cached: true, auditResultWrite: cached.mode === 'single' ? { status: 'cached', savedRows: 0 } : cached.auditResultWrite };
+  const timestamp = new Date().toISOString(); const evaluationDate = timestamp.slice(0, 10); let responseBody;
+  if (input.mode === 'single') {
+    const prompt = qaMarkdownPrompt(user.companyName, prepared.rubric, prepared.products, audioFiles, evaluationDate);
+    const reportMarkdown = await providerClient.callMarkdown(input.provider, prepared.apiKey, audioFiles, prompt);
+    const parsedCalls = pipeline.parseQaMarkdownReport(reportMarkdown, audioFiles.map(file => file.name), prepared.rubric);
+    const remainingCalls = [...parsedCalls]; const items = []; const results = [];
+    for (const file of audioFiles) {
+      let index = remainingCalls.findIndex(result => result.fileName === file.name);
+      if (index < 0 && remainingCalls.length === audioFiles.length - results.length) index = 0;
+      if (index < 0) { items.push({ kind: 'call', fileName: file.name, status: 'failed', error: 'The combined Markdown response did not contain a separate report for this call. No database row was created.', errorCode: 'report_parse', retryable: true }); continue; }
+      const result = remainingCalls.splice(index, 1)[0]; result.fileName = file.name;
+      if (prepared.products.length && !result.productCheckPresent) result.markdown = `> ⚠️ নির্বাচিত প্রোডাক্ট তথ্য দেওয়া হয়েছিল, কিন্তু AI রিপোর্টে claim-by-claim product verification পাওয়া যায়নি।\n\n${result.markdown}`;
+      results.push(result); items.push({ kind: 'call', fileName: file.name, status: 'success', markdown: result.markdown, score: Number.isFinite(result.finalScore) ? result.finalScore : '—', maximum: result.maximum, ce: result.ceDetected });
+    }
+    const storableResults = results.filter(result => result.storageEligible);
+    if (storableResults.length) {
+      try { const summary = markdownRunSummary(storableResults); items.push({ kind: 'summary', status: 'success', markdown: pipeline.renderQaSummary(prepared.templates.qaSummary, summary, storableResults, storableResults.map(result => result.fileName), user.companyName, prepared.parameter, evaluationDate) }); }
+      catch (error) { console.error('Local QA run summary failed:', error.message); items.push({ kind: 'summary', status: 'failed', error: 'The local run summary could not be generated.', errorCode: 'summary_render', retryable: false }); }
+    }
+    let auditResultWrite = { status: 'saved', savedRows: storableResults.length };
+    if (storableResults.length !== results.length) auditResultWrite = { status: 'failed', savedRows: 0, message: 'The Markdown reports were generated, but one or more scores could not be read, so no audit rows were saved.' };
+    else { try { await dataStore.appendAuditResults(storableResults.map(result => pipeline.auditResultRowFromMarkdown(result, prepared.parameter, timestamp))); } catch (error) { console.error('Audit result storage failed:', error.message); auditResultWrite = { status: 'failed', savedRows: 0, message: 'Reports were generated, but the audit results were not saved to the database.' }; } }
+    responseBody = { mode: input.mode, items, report: items.filter(item => item.markdown).map(item => item.markdown).join('\n\n---\n\n'), partial: items.some(item => item.status === 'failed') || auditResultWrite.status === 'failed', auditResultWrite, cached: false };
+    if (!responseBody.partial) await cacheSet(dataStore, memoryCache, prepared.cacheKey, responseBody, cacheTtlMs);
+  } else {
+    const prompt = input.mode === 'voice' ? voicePrompt(user.companyName, prepared.products, audioFiles.length) : coachingPrompt(user.companyName, prepared.rubric, prepared.products, audioFiles.length);
+    const schema = input.mode === 'voice' ? pipeline.VOICE_SCHEMA : pipeline.COACHING_SCHEMA; const template = prepared.templates[input.mode];
+    const structured = await providerClient.callStructured(input.provider, prepared.apiKey, audioFiles, prompt, schema);
+    const markdown = input.mode === 'voice' ? pipeline.renderVoice(template, pipeline.validateVoiceResult(structured), audioFiles.length) : pipeline.renderCoaching(template, pipeline.validateCoachingResult(structured), user.companyName);
+    responseBody = { mode: input.mode, items: [{ kind: input.mode, status: 'success', markdown }], report: markdown, partial: false, auditResultWrite: { status: 'not_applicable', savedRows: 0 }, cached: false };
+    await cacheSet(dataStore, memoryCache, prepared.cacheKey, responseBody, cacheTtlMs);
+  }
+  await dataStore.incrementUsage(user.email).catch(error => console.error('Usage update failed:', error.message));
+  return responseBody;
+}
+
+function createAnalysisQueue({ dataStore, handler, minStartIntervalMs = envNumber('AI_MIN_START_INTERVAL_MS', 60000), cooldownMs = envNumber('AI_RATE_LIMIT_COOLDOWN_MS', 60000), workerLeaseMs = envNumber('AI_WORKER_LEASE_MS', 30 * 60 * 1000), pollMs = 2000 }) {
+  const workerId = crypto.randomUUID(); let running = false; let stopped = false; let timer = null;
+  function schedule(delay = pollMs) { if (stopped || timer) return; timer = setTimeout(() => { timer = null; drain().catch(error => { console.error('Analysis queue failed:', error.message); schedule(); }); }, delay); timer.unref?.(); }
+  async function drain() {
+    if (running || stopped) return;
+    const leaseUntil = dataStore.acquireWorkerLease ? await dataStore.acquireWorkerLease(workerId, workerLeaseMs) : new Date(Date.now() + workerLeaseMs);
+    if (!leaseUntil) return schedule();
+    let job;
+    try { await dataStore.recoverJobs(); job = await dataStore.claimNextJob(workerId, leaseUntil); }
+    catch (error) { if (dataStore.releaseWorkerLease) await dataStore.releaseWorkerLease(workerId).catch(() => {}); throw error; }
+    if (!job) { if (dataStore.releaseWorkerLease) await dataStore.releaseWorkerLease(workerId); return schedule(); }
+    running = true;
+    try {
+      const rateKey = job.provider || 'gemini'; const state = await dataStore.getRateState(rateKey); const delay = Math.max(0, new Date(state?.nextAllowedAt || 0).getTime() - Date.now());
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+      await dataStore.setNextAllowedAt(new Date(Date.now() + minStartIntervalMs), rateKey);
+      const audioFiles = await dataStore.loadJobAudio(job);
+      const result = await handler(job, audioFiles);
+      await dataStore.completeJob(job.jobId, result);
+    } catch (error) {
+      const safe = safeProviderFailure(error);
+      if (safe.errorCode === 'rate_limited') await dataStore.setCooldownUntil(new Date(Date.now() + Math.max(cooldownMs, safe.retryAfterMs || 0)), job.provider || 'gemini').catch(() => {});
+      await dataStore.failJob(job.jobId, safe);
+      console.error(`Analysis job ${job.jobId} failed:`, error.message);
+    } finally { if (dataStore.releaseWorkerLease) await dataStore.releaseWorkerLease(workerId).catch(() => {}); running = false; schedule(0); }
+  }
+  return {
+    async start() { schedule(0); },
+    wake() { schedule(0); },
+    stop() { stopped = true; if (timer) clearTimeout(timer); timer = null; }
+  };
+}
+
 function createApp(options = {}) {
-  const app = express(); const sheetStore = options.sheetStore || createGoogleSheetStore(); const providerClient = options.providerClient || createProviderClient(); const sessions = options.sessions || createSessionManager(); const analysisCache = options.analysisCache || createAnalysisCache(); const templateDir = options.templateDir || TEMPLATE_DIR;
-  const allowedOrigins = options.allowedOrigins || envList('PUBLIC_ORIGINS', process.env.PUBLIC_ORIGIN ? [process.env.PUBLIC_ORIGIN] : []); const secureCookies = options.secureCookies ?? (process.env.COOKIE_SECURE === undefined ? process.env.NODE_ENV === 'production' : String(process.env.COOKIE_SECURE).toLowerCase() === 'true'); const usageLocks = new Map();
+  const app = express(); const dataStore = options.dataStore || createMongoStore(); const providerClient = options.providerClient || createProviderClient(); const sessions = options.sessions || createSessionManager(); const memoryCache = options.analysisCache || createAnalysisCache(); const templateDir = options.templateDir || TEMPLATE_DIR;
+  const cacheTtlMs = options.cacheTtlMs || envNumber('AI_CACHE_TTL_MS', 6 * 60 * 60 * 1000); const queueEnabled = options.queueEnabled ?? Boolean(dataStore.createAnalysisJob);
+  const allowedOrigins = options.allowedOrigins || envList('PUBLIC_ORIGINS', process.env.PUBLIC_ORIGIN ? [process.env.PUBLIC_ORIGIN] : []); const secureCookies = options.secureCookies ?? (process.env.COOKIE_SECURE === undefined ? process.env.NODE_ENV === 'production' : String(process.env.COOKIE_SECURE).toLowerCase() === 'true');
+  const queue = queueEnabled ? createAnalysisQueue({ dataStore, handler: async (job, audioFiles) => { const user = await dataStore.findByEmail(job.ownerEmail); if (!user) throw Object.assign(new Error('The analysis user no longer exists.'), { errorCode: 'request_rejected', retryable: false }); return runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, job.request, audioFiles); }, ...(options.queueOptions || {}) }) : null;
+  if (queue) queue.start().catch(error => console.error('Analysis queue startup failed:', error.message));
   app.disable('x-powered-by'); app.set('trust proxy', options.trustProxy ?? (process.env.NODE_ENV === 'production' ? 1 : false)); app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false })); app.use((req, res, next) => { const token = parseCookies(req.headers.cookie).qa_session; req.sessionToken = token; req.session = token ? sessions.get(token) : null; next(); });
   const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many login attempts. Try again later.' } }); const requireAuth = (req, res, next) => req.session ? next() : res.status(401).json({ error: 'Authentication required.' }); const requireSameOrigin = (req, res, next) => isSameOrigin(req, allowedOrigins) ? next() : res.status(403).json({ error: 'Invalid request origin.' }); const jsonSmall = express.json({ limit: '20kb' });
-  app.get('/healthz', (req, res) => res.json({ ok: true }));
-  app.post('/api/login', loginLimiter, requireSameOrigin, jsonSmall, async (req, res) => { const email = normalizeEmail(req.body?.email); const password = String(req.body?.password || ''); if (!email || !password || email.length > 320 || password.length > 512) return res.status(401).json({ error: 'Invalid email or password.' }); try { const user = await sheetStore.findByEmail(email); if (!user || !safeEqual(user.password, password)) return res.status(401).json({ error: 'Invalid email or password.' }); const token = sessions.create(user.email, user.defaultParameter || 'Outbound'); setSessionCookie(res, token, secureCookies); return res.json({ user: publicUser(user) }); } catch (error) { console.error('Login lookup failed:', error.message); return res.status(503).json({ error: 'Authentication service is temporarily unavailable.' }); } });
-  app.get('/api/session', requireAuth, async (req, res) => { try { const user = await sheetStore.findByEmail(req.session.email); if (!user) { sessions.destroy(req.sessionToken); clearSessionCookie(res, secureCookies); return res.status(401).json({ error: 'Session is no longer valid.' }); } return res.json({ user: publicUser(user) }); } catch (error) { console.error('Session lookup failed:', error.message); return res.status(503).json({ error: 'Authentication service is temporarily unavailable.' }); } });
-  app.get('/api/audit-config', requireAuth, async (req, res) => { try { const [configuration, user] = await Promise.all([sheetStore.getAuditConfiguration(), sheetStore.findByEmail(req.session.email)]); if (!user) return res.status(401).json({ error: 'Session is no longer valid.' }); const saved = configuration.parameters.includes(user.defaultParameter) ? user.defaultParameter : configuration.parameters[0]; const active = configuration.parameters.includes(req.session.activeParameter) ? req.session.activeParameter : saved; sessions.setParameter(req.sessionToken, active); return res.json({ products: configuration.products, parameters: configuration.parameters, savedDefaultParameter: saved, activeParameter: active }); } catch (error) { console.error('Audit configuration lookup failed:', error.message); return res.status(503).json({ error: 'Audit configuration is temporarily unavailable.' }); } });
-  async function validateParameter(req, res) { const parameter = String(req.body?.parameter || '').trim(); if (!parameter) { res.status(400).json({ error: 'Choose a QA parameter.' }); return null; } const entry = await sheetStore.getQaParameter(parameter); if (!entry) { res.status(400).json({ error: 'The selected QA parameter is no longer available.' }); return null; } return entry.name; }
+  app.get('/healthz', async (req, res) => { try { if (dataStore.ping) await dataStore.ping(); return res.json({ ok: true, database: 'mongodb' }); } catch (error) { return res.status(503).json({ ok: false, database: 'unavailable' }); } });
+  app.post('/api/login', loginLimiter, requireSameOrigin, jsonSmall, async (req, res) => { const email = normalizeEmail(req.body?.email); const password = String(req.body?.password || ''); if (!email || !password || email.length > 320 || password.length > 512) return res.status(401).json({ error: 'Invalid email or password.' }); try { const user = await dataStore.findByEmail(email); if (!user || !safeEqual(user.password, password)) return res.status(401).json({ error: 'Invalid email or password.' }); const token = sessions.create(user.email, user.defaultParameter || 'Outbound'); setSessionCookie(res, token, secureCookies); return res.json({ user: publicUser(user) }); } catch (error) { console.error('Login lookup failed:', error.message); return res.status(503).json({ error: 'Authentication service is temporarily unavailable.' }); } });
+  app.get('/api/session', requireAuth, async (req, res) => { try { const user = await dataStore.findByEmail(req.session.email); if (!user) { sessions.destroy(req.sessionToken); clearSessionCookie(res, secureCookies); return res.status(401).json({ error: 'Session is no longer valid.' }); } return res.json({ user: publicUser(user) }); } catch (error) { console.error('Session lookup failed:', error.message); return res.status(503).json({ error: 'Authentication service is temporarily unavailable.' }); } });
+  app.get('/api/audit-config', requireAuth, async (req, res) => { try { const [configuration, user] = await Promise.all([dataStore.getAuditConfiguration(), dataStore.findByEmail(req.session.email)]); if (!user) return res.status(401).json({ error: 'Session is no longer valid.' }); const saved = configuration.parameters.includes(user.defaultParameter) ? user.defaultParameter : configuration.parameters[0]; const active = configuration.parameters.includes(req.session.activeParameter) ? req.session.activeParameter : saved; sessions.setParameter(req.sessionToken, active); return res.json({ products: configuration.products, parameters: configuration.parameters, savedDefaultParameter: saved, activeParameter: active }); } catch (error) { console.error('Audit configuration lookup failed:', error.message); return res.status(503).json({ error: 'Audit configuration is temporarily unavailable.' }); } });
+  async function validateParameter(req, res) { const parameter = String(req.body?.parameter || '').trim(); if (!parameter) { res.status(400).json({ error: 'Choose a QA parameter.' }); return null; } const entry = await dataStore.getQaParameter(parameter); if (!entry) { res.status(400).json({ error: 'The selected QA parameter is no longer available.' }); return null; } return entry.name; }
   app.put('/api/session/parameter', requireSameOrigin, requireAuth, jsonSmall, async (req, res) => { try { const parameter = await validateParameter(req, res); if (!parameter) return; sessions.setParameter(req.sessionToken, parameter); return res.json({ activeParameter: parameter }); } catch (error) { console.error('Parameter selection failed:', error.message); return res.status(503).json({ error: 'The parameter could not be updated.' }); } });
-  app.put('/api/user/default-parameter', requireSameOrigin, requireAuth, jsonSmall, async (req, res) => { try { const parameter = await validateParameter(req, res); if (!parameter) return; await sheetStore.saveDefaultParameter(req.session.email, parameter); sessions.setParameter(req.sessionToken, parameter); return res.json({ savedDefaultParameter: parameter, activeParameter: parameter }); } catch (error) { console.error('Default parameter update failed:', error.message); return res.status(503).json({ error: 'The default parameter could not be saved.' }); } });
+  app.put('/api/user/default-parameter', requireSameOrigin, requireAuth, jsonSmall, async (req, res) => { try { const parameter = await validateParameter(req, res); if (!parameter) return; await dataStore.saveDefaultParameter(req.session.email, parameter); sessions.setParameter(req.sessionToken, parameter); return res.json({ savedDefaultParameter: parameter, activeParameter: parameter }); } catch (error) { console.error('Default parameter update failed:', error.message); return res.status(503).json({ error: 'The default parameter could not be saved.' }); } });
   app.post('/api/logout', requireSameOrigin, (req, res) => { if (req.sessionToken) sessions.destroy(req.sessionToken); clearSessionCookie(res, secureCookies); res.json({ ok: true }); });
 
   app.post('/api/analyze', requireSameOrigin, requireAuth, express.json({ limit: Infinity }), async (req, res) => {
-    const provider = String(req.body?.provider || '').toLowerCase(); const mode = String(req.body?.mode || 'single');
-    if (!['gemini', 'openai'].includes(provider)) return res.status(400).json({ error: 'Unsupported AI provider.' }); if (!['single', 'voice', 'coaching'].includes(mode)) return res.status(400).json({ error: 'Unsupported analysis mode.' });
-    const categories = [...new Set((Array.isArray(req.body?.categories) ? req.body.categories : []).map(item => String(item || '').trim()).filter(Boolean))]; const selections = (Array.isArray(req.body?.productSelections) ? req.body.productSelections : []).map(item => ({ category: String(item?.category || '').trim(), subCategory: String(item?.subCategory || '').trim() })).filter(item => item.category && item.subCategory);
-    if (categories.length > 50 || selections.length > 200 || categories.some(item => item.length > 300) || selections.some(item => item.category.length > 300 || item.subCategory.length > 500)) return res.status(400).json({ error: 'Invalid product selection.' });
-    let audioFiles; try { audioFiles = validateAudioFiles(req.body?.audioFiles); } catch (error) { return res.status(400).json({ error: error.message }); }
+    let input; let audioFiles;
+    try { input = normalizeAnalysisInput(req.body); audioFiles = validateAudioFiles(req.body?.audioFiles); }
+    catch (error) { return res.status(error.statusCode || 400).json({ error: error.message }); }
     try {
-      const user = await sheetStore.findByEmail(req.session.email); if (!user) return res.status(401).json({ error: 'Session is no longer valid.' }); const apiKey = provider === 'gemini' ? user.geminiKey : user.openaiKey; if (!apiKey) return res.status(400).json({ error: `No ${provider} API key is configured for this account.` });
-      const products = await sheetStore.getProductBriefs(categories, selections); if ((categories.length || selections.length) && !products.length) return res.status(400).json({ error: 'The selected product briefs were not found.' });
-      let parameter = ''; let rubric = null;
-      if (mode !== 'voice') { parameter = String(req.body?.parameter || '').trim(); if (!parameter) return res.status(400).json({ error: 'Choose a QA parameter.' }); const entry = await sheetStore.getQaParameter(parameter); if (!entry) return res.status(400).json({ error: 'The selected QA parameter is no longer available.' }); rubric = pipeline.parseQaRubric(entry.name, entry.detail); parameter = entry.name; sessions.setParameter(req.sessionToken, parameter); }
-      const templateKeys = mode === 'single' ? ['qaSummary'] : [mode]; const templates = pipeline.loadAndValidateTemplates(templateDir, templateKeys); const timestamp = new Date().toISOString(); const evaluationDate = timestamp.slice(0, 10); let responseBody;
-      if (mode === 'single') {
-        const prompt = qaMarkdownPrompt(user.companyName, rubric, products, audioFiles, evaluationDate);
-        const cacheKey = analysisCacheKey(user, provider, `qa-markdown\n${user.companyName}\n${parameter}\n${rubric.source}\n${productContext(products)}\n${templates.qaSummary}`, audioFiles);
-        const cached = analysisCache.get(cacheKey);
-        if (cached) return res.json({ ...cached, cached: true, auditResultWrite: { status: 'cached', savedRows: 0 } });
-        const reportMarkdown = await providerClient.callMarkdown(provider, apiKey, audioFiles, prompt);
-        const parsedCalls = pipeline.parseQaMarkdownReport(reportMarkdown, audioFiles.map(file => file.name), rubric);
-        const remainingCalls = [...parsedCalls];
-        const items = [];
-        const results = [];
-        for (const file of audioFiles) {
-          let index = remainingCalls.findIndex(result => result.fileName === file.name);
-          if (index < 0 && remainingCalls.length === audioFiles.length - results.length) index = 0;
-          if (index < 0) { items.push({ kind: 'call', fileName: file.name, status: 'failed', error: 'The combined Markdown response did not contain a separate report for this call. No Sheet row was created.', errorCode: 'report_parse', retryable: true }); continue; }
-          const result = remainingCalls.splice(index, 1)[0]; result.fileName = file.name;
-          if (products.length && !result.productCheckPresent) result.markdown = `> ⚠️ নির্বাচিত প্রোডাক্ট তথ্য দেওয়া হয়েছিল, কিন্তু AI রিপোর্টে claim-by-claim product verification পাওয়া যায়নি।\n\n${result.markdown}`;
-          results.push(result);
-          items.push({ kind: 'call', fileName: file.name, status: 'success', markdown: result.markdown, score: Number.isFinite(result.finalScore) ? result.finalScore : '—', maximum: result.maximum, ce: result.ceDetected });
-        }
-        const storableResults = results.filter(result => result.storageEligible);
-        if (storableResults.length) {
-          try { const summary = markdownRunSummary(storableResults); items.push({ kind: 'summary', status: 'success', markdown: pipeline.renderQaSummary(templates.qaSummary, summary, storableResults, storableResults.map(result => result.fileName), user.companyName, parameter, evaluationDate) }); }
-          catch (error) { console.error('Local QA run summary failed:', error.message); items.push({ kind: 'summary', status: 'failed', error: 'The local run summary could not be generated.', errorCode: 'summary_render', retryable: false }); }
-        }
-        let auditResultWrite = { status: 'saved', savedRows: storableResults.length };
-        if (storableResults.length !== results.length) auditResultWrite = { status: 'failed', savedRows: 0, message: 'The Markdown reports were generated, but one or more scores could not be read, so no audit rows were saved.' };
-        else { try { await sheetStore.appendAuditResults(storableResults.map(result => pipeline.auditResultRowFromMarkdown(result, parameter, timestamp))); } catch (error) { console.error('Audit result storage failed:', error.message); auditResultWrite = { status: 'failed', savedRows: 0, message: 'Reports were generated, but the audit results were not saved to Google Sheets.' }; } }
-        responseBody = { mode, items, report: items.filter(item => item.markdown).map(item => item.markdown).join('\n\n---\n\n'), partial: items.some(item => item.status === 'failed') || auditResultWrite.status === 'failed', auditResultWrite, cached: false };
-        if (!responseBody.partial) analysisCache.set(cacheKey, responseBody);
-      } else {
-        const prompt = mode === 'voice' ? voicePrompt(user.companyName, products, audioFiles.length) : coachingPrompt(user.companyName, rubric, products, audioFiles.length); const schema = mode === 'voice' ? pipeline.VOICE_SCHEMA : pipeline.COACHING_SCHEMA; const template = templates[mode]; const cacheKey = analysisCacheKey(user, provider, `${prompt}\n${template}`, audioFiles); const cached = analysisCache.get(cacheKey); if (cached) return res.json({ ...cached, cached: true });
-        const structured = await providerClient.callStructured(provider, apiKey, audioFiles, prompt, schema); const markdown = mode === 'voice' ? pipeline.renderVoice(template, pipeline.validateVoiceResult(structured), audioFiles.length) : pipeline.renderCoaching(template, pipeline.validateCoachingResult(structured), user.companyName); responseBody = { mode, items: [{ kind: mode, status: 'success', markdown }], report: markdown, partial: false, auditResultWrite: { status: 'not_applicable', savedRows: 0 }, cached: false }; analysisCache.set(cacheKey, responseBody);
-      }
-      const previous = usageLocks.get(user.email) || Promise.resolve(); const next = previous.catch(() => {}).then(() => sheetStore.incrementUsage(user.email)); usageLocks.set(user.email, next); await next.catch(error => console.error('Usage update failed:', error.message)); if (usageLocks.get(user.email) === next) usageLocks.delete(user.email); return res.json(responseBody);
-    } catch (error) { console.error('Analysis failed:', error.message); if (/rubric|template|placeholder/i.test(error.message)) return res.status(503).json({ error: error.message, errorCode: 'configuration_error', retryable: false }); return res.status(502).json(safeProviderFailure(error)); }
+      const user = await dataStore.findByEmail(req.session.email); if (!user) return res.status(401).json({ error: 'Session is no longer valid.' });
+      const prepared = await prepareAnalysis(dataStore, user, input, audioFiles, templateDir);
+      if (input.mode !== 'voice') sessions.setParameter(req.sessionToken, prepared.parameter);
+      const cached = await cacheGet(dataStore, memoryCache, prepared.cacheKey);
+      if (cached) return res.json({ ...cached, cached: true, auditResultWrite: input.mode === 'single' ? { status: 'cached', savedRows: 0 } : cached.auditResultWrite });
+      if (!queue) return res.json(await runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, input, audioFiles));
+      const dedupeKey = analysisDedupeKey(user.email, input, audioFiles); const active = await dataStore.findActiveJob(user.email, dedupeKey);
+      if (active) return res.status(202).json({ jobId: active.jobId, status: active.status, deduplicated: true });
+      const jobId = crypto.randomUUID(); await dataStore.createAnalysisJob({ jobId, ownerEmail: user.email, provider: input.provider, mode: input.mode, dedupeKey, cacheKey: prepared.cacheKey, request: input, attempts: 0 }, audioFiles); queue.wake();
+      return res.status(202).json({ jobId, status: 'queued', position: 1, deduplicated: false });
+    } catch (error) { console.error('Analysis submission failed:', error.message); if (error.statusCode) return res.status(error.statusCode).json({ error: error.message }); if (/rubric|template|placeholder/i.test(error.message)) return res.status(503).json({ error: error.message, errorCode: 'configuration_error', retryable: false }); return res.status(502).json(safeProviderFailure(error)); }
+  });
+
+  app.get('/api/analysis-jobs/:jobId', requireAuth, async (req, res) => {
+    if (!queue) return res.status(404).json({ error: 'Queued analysis is unavailable.' });
+    try { const job = await dataStore.getJob(req.session.email, String(req.params.jobId || '')); if (!job) return res.status(404).json({ error: 'Analysis job was not found.' }); if (job.status === 'complete') return res.json({ jobId: job.jobId, status: job.status, result: job.result }); if (job.status === 'failed') return res.json({ jobId: job.jobId, status: job.status, error: job.error }); return res.json({ jobId: job.jobId, status: job.status, position: job.position || 0, createdAt: job.createdAt, startedAt: job.startedAt }); }
+    catch (error) { console.error('Analysis job lookup failed:', error.message); return res.status(503).json({ error: 'Analysis status is temporarily unavailable.' }); }
   });
 
   if (fs.existsSync(DIST_INDEX_PATH)) { app.use('/assets', express.static(path.join(DIST_DIR, 'assets'), { index: false })); app.get('/favicon.svg', (req, res) => res.sendFile(path.join(DIST_DIR, 'favicon.svg'))); app.get('/', (req, res) => res.sendFile(DIST_INDEX_PATH)); }
@@ -457,4 +465,4 @@ function createApp(options = {}) {
 }
 
 if (require.main === module) { require('dotenv').config(); const port = envNumber('PORT', 3000); createApp().listen(port, () => console.log(`QA Auditor listening on port ${port}`)); }
-module.exports = { createApp, createGoogleSheetStore, createProviderClient, createSessionManager, createAnalysisCache, rowsToUsers, rowsToProductBriefs, groupProductOptions, normalizeEmail, qaPrompt, qaMarkdownPrompt, parseQaRubric: pipeline.parseQaRubric };
+module.exports = { createApp, createMongoStore, createProviderClient, createSessionManager, createAnalysisCache, createAnalysisQueue, normalizeAnalysisInput, normalizeEmail, qaPrompt, qaMarkdownPrompt, parseQaRubric: pipeline.parseQaRubric };

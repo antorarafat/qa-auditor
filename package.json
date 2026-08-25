@@ -2,7 +2,7 @@
   "name": "10ms-qa-audit-portal",
   "version": "1.0.0",
   "private": true,
-  "description": "10 Minute School QA Auditor with sheet-backed access control",
+  "description": "10 Minute School QA Auditor with MongoDB-backed access control and queued analysis",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -20,10 +20,10 @@
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
-    "googleapis": "^155.0.0",
     "helmet": "^8.1.0",
     "lucide-react": "^0.468.0",
     "marked": "^15.0.7",
+    "mongodb": "^6.21.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

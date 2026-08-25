@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const request = require('supertest');
-const { createApp, createProviderClient, rowsToUsers, rowsToProductBriefs, parseQaRubric, qaPrompt, qaMarkdownPrompt } = require('../server');
+const { createApp, createProviderClient, normalizeAnalysisInput, parseQaRubric, qaPrompt, qaMarkdownPrompt } = require('../server');
 const { loadTemplate, loadAndValidateTemplates, renderTemplate, validateQaResult, renderQaCall, parseQaMarkdownReport, qaSchema } = require('../lib/audit-pipeline');
 
 const RUBRIC = `১. Greetings (৫ নম্বর)\n- Greetings (২)\n- Permission (৩)\n\n২. Closing (৫ নম্বর)\n- Summary (২)\n- Goodbye (৩)\n\nCritical Errors\n- Wrong information\n- Rudeness`;
@@ -22,6 +22,27 @@ function fakeStore(options = {}) {
     async appendAuditResults(rows) { if (options.writeFailure) throw new Error('write failed'); writes.push(...rows); return rows.length; },
     async incrementUsage(email) { users.find(user => user.email === email).usage += 1; return true; }
   };
+}
+
+function queuedStore(options = {}) {
+  const base = fakeStore(options); const jobs = []; const cache = new Map(); const rate = new Map();
+  return Object.assign(base, {
+    jobs,
+    async ping() { return { ok: 1 }; },
+    async getCachedAnalysis(key) { return cache.get(key) || null; },
+    async setCachedAnalysis(key, result) { cache.set(key, result); },
+    async findActiveJob(ownerEmail, dedupeKey) { const job = jobs.find(item => item.ownerEmail === ownerEmail && item.dedupeKey === dedupeKey && ['queued', 'processing'].includes(item.status)); return job ? { jobId: job.jobId, status: job.status } : null; },
+    async createAnalysisJob(job, audioFiles) { jobs.push({ ...job, audioFiles, status: 'queued', createdAt: new Date(), attempts: 0 }); return { jobId: job.jobId, status: 'queued' }; },
+    async recoverJobs() { for (const job of jobs) if (job.status === 'processing') job.status = 'queued'; },
+    async claimNextJob() { const job = jobs.find(item => item.status === 'queued'); if (!job) return null; job.status = 'processing'; job.startedAt = new Date(); job.attempts += 1; return job; },
+    async loadJobAudio(job) { return job.audioFiles; },
+    async completeJob(jobId, result) { const job = jobs.find(item => item.jobId === jobId); job.status = 'complete'; job.result = result; },
+    async failJob(jobId, error) { const job = jobs.find(item => item.jobId === jobId); job.status = 'failed'; job.error = error; },
+    async getJob(ownerEmail, jobId) { const job = jobs.find(item => item.ownerEmail === ownerEmail && item.jobId === jobId); if (!job) return null; return { ...job, position: job.status === 'queued' ? jobs.filter(item => item.status === 'queued' && item.createdAt <= job.createdAt).length : 0 }; },
+    async getRateState(key) { return rate.get(key) || null; },
+    async setNextAllowedAt(nextAllowedAt, key) { rate.set(key, { nextAllowedAt }); },
+    async setCooldownUntil(nextAllowedAt, key) { rate.set(key, { nextAllowedAt }); }
+  });
 }
 
 function qaResult(overrides = {}) {
@@ -83,6 +104,7 @@ function fakeProviders(options = {}) {
     calls: [],
     async callMarkdown(provider, key, files, prompt) {
       this.calls.push({ kind: 'markdown', provider, key, files, prompt });
+      if (options.delayMs) await new Promise(resolve => setTimeout(resolve, options.delayMs));
       if (options.error) throw options.error;
       return options.markdown || qaMarkdownResult(files.filter(file => file.name !== options.failFile));
     },
@@ -100,10 +122,9 @@ function fakeProviders(options = {}) {
 function payload(overrides = {}) { return { provider: 'gemini', mode: 'single', parameter: 'Outbound', categories: [], productSelections: [], audioFiles: [{ name: 'call.wav', mimeType: 'audio/wav', data: Buffer.from('audio').toString('base64') }], ...overrides }; }
 async function login(agent) { const response = await agent.post('/api/login').send({ email: 'user@example.com', password: 'plain-password' }); assert.equal(response.status, 200); }
 
-test('maps user defaults and product sheet headers', () => {
-  const users = rowsToUsers([['User Email', 'User Password', 'User Name', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'Usage', 'Default QA Parameter'], ['USER@example.com', 'pw', 'User', 'g', '', '3', 'Inbound']]);
-  assert.equal(users[0].email, 'user@example.com'); assert.equal(users[0].defaultParameter, 'Inbound'); assert.equal(users[0].defaultParameterColumn, 6);
-  assert.deepEqual(rowsToProductBriefs([['Category', 'Sub-Category', 'Brief'], ['HSC', 'Science', 'Facts']]), [{ category: 'HSC', subCategory: 'Science', brief: 'Facts' }]);
+test('normalizes analysis input without changing selected business context', () => {
+  const input = normalizeAnalysisInput({ provider: 'GEMINI', mode: 'single', parameter: 'Outbound', categories: ['HSC', 'HSC'], productSelections: [{ category: 'HSC', subCategory: 'Science' }] });
+  assert.equal(input.provider, 'gemini'); assert.equal(input.parameter, 'Outbound'); assert.deepEqual(input.categories, ['HSC']); assert.deepEqual(input.selections, [{ category: 'HSC', subCategory: 'Science' }]);
 });
 
 test('parses Bengali numerals, categories, rows, weights, and CE rules', () => {
@@ -406,7 +427,7 @@ test('stops immediately when Gemini credentials are rejected', async () => {
 });
 
 test('auth config returns parameters and session/default behavior without secrets', async () => {
-  const store = fakeStore(); const app = createApp({ sheetStore: store, providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
+  const store = fakeStore(); const app = createApp({ dataStore: store, providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
   const config = await agent.get('/api/audit-config'); assert.equal(config.status, 200); assert.deepEqual(config.body.parameters, ['Outbound', 'Inbound']); assert.equal(config.body.activeParameter, 'Outbound'); assert.equal('scorecard' in config.body, false); assert.equal(JSON.stringify(config.body).includes('secret'), false);
   assert.equal((await agent.put('/api/session/parameter').send({ parameter: 'Inbound' })).status, 200);
   assert.equal((await agent.get('/api/audit-config')).body.activeParameter, 'Inbound'); assert.equal(store.users[0].defaultParameter, 'Outbound');
@@ -414,21 +435,21 @@ test('auth config returns parameters and session/default behavior without secret
 });
 
 test('trusts one configured proxy hop for Cloudflare forwarded client addresses', async () => {
-  const app = createApp({ sheetStore: fakeStore(), providerClient: fakeProviders(), trustProxy: 1 });
+  const app = createApp({ dataStore: fakeStore(), providerClient: fakeProviders(), trustProxy: 1 });
   assert.equal(app.get('trust proxy'), 1);
   const response = await request(app).post('/api/login').set('X-Forwarded-For', '203.0.113.10').send({ email: 'user@example.com', password: 'plain-password' });
   assert.equal(response.status, 200);
 });
 
 test('requires parameter for QA and coaching but ignores it for Customer Voice', async () => {
-  const providers = fakeProviders(); const app = createApp({ sheetStore: fakeStore(), providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const providers = fakeProviders(); const app = createApp({ dataStore: fakeStore(), providerClient: providers }); const agent = request.agent(app); await login(agent);
   assert.equal((await agent.post('/api/analyze').send(payload({ parameter: '' }))).status, 400);
   assert.equal((await agent.post('/api/analyze').send(payload({ mode: 'coaching', parameter: '' }))).status, 400);
   const voice = await agent.post('/api/analyze').send(payload({ mode: 'voice', parameter: 'Does not exist' })); assert.equal(voice.status, 200); assert.equal(providers.calls[0].prompt.includes('LIVE RUBRIC'), false);
 });
 
 test('one-call QA uses one AI request while still returning the call and summary cards', async () => {
-  const store = fakeStore(); const providers = fakeProviders(); const app = createApp({ sheetStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const store = fakeStore(); const providers = fakeProviders(); const app = createApp({ dataStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
   const response = await agent.post('/api/analyze').send(payload());
   assert.equal(response.status, 200);
   assert.deepEqual(response.body.items.map(item => item.kind), ['call', 'summary']);
@@ -442,7 +463,7 @@ test('keeps the audit but flags a missing product verification section', async (
     .replace(/Advisor claim/g, 'Claim')
     .replace(/Official fact/g, 'Reference')
     .replace(/Verdict/g, 'Result');
-  const app = createApp({ sheetStore: fakeStore(), providerClient: fakeProviders({ markdown }) });
+  const app = createApp({ dataStore: fakeStore(), providerClient: fakeProviders({ markdown }) });
   const agent = request.agent(app); await login(agent);
   const response = await agent.post('/api/analyze').send(payload({ productSelections: [{ category: 'HSC 28', subCategory: 'PCMB' }] }));
   assert.equal(response.status, 200);
@@ -452,7 +473,7 @@ test('keeps the audit but flags a missing product verification section', async (
 
 test('provider failures expose a safe machine-readable reason and retry flag', async () => {
   const providerClient = { async callMarkdown() { const error = new Error('secret upstream detail'); error.errorCode = 'rate_limited'; error.retryable = true; error.providerStatus = 429; throw error; } };
-  const app = createApp({ sheetStore: fakeStore(), providerClient }); const agent = request.agent(app); await login(agent);
+  const app = createApp({ dataStore: fakeStore(), providerClient }); const agent = request.agent(app); await login(agent);
   const response = await agent.post('/api/analyze').send(payload());
   assert.equal(response.status, 502);
   assert.equal(response.body.errorCode, 'rate_limited');
@@ -461,36 +482,46 @@ test('provider failures expose a safe machine-readable reason and retry flag', a
 });
 
 test('QA uses one Markdown request for the run, appends A:K rows, and caches identical runs for six hours', async () => {
-  const store = fakeStore(); const providers = fakeProviders(); const app = createApp({ sheetStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const store = fakeStore(); const providers = fakeProviders(); const app = createApp({ dataStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
   const audioFiles = ['a.wav', 'b.wav'].map(name => ({ name, mimeType: 'audio/wav', data: Buffer.from(name).toString('base64') }));
   const first = await agent.post('/api/analyze').send(payload({ audioFiles })); assert.equal(first.status, 200); assert.deepEqual(first.body.items.map(item => item.kind), ['call', 'call', 'summary']); assert.match(first.body.report, /Robi - QA Audit/); assert.equal(store.writes.length, 2); assert.equal(store.writes[0].length, 11); assert.equal(store.writes[0][2], 'Outbound'); assert.equal(store.writes[0][3], 9); assert.equal(store.users[0].usage, 1);
   const second = await agent.post('/api/analyze').send(payload({ audioFiles })); assert.equal(second.body.cached, true); assert.equal(second.body.auditResultWrite.status, 'cached'); assert.equal(store.writes.length, 2); assert.equal(providers.calls.length, 1); assert.equal(store.users[0].usage, 1);
 });
 
 test('partial QA keeps and stores successful calls only', async () => {
-  const store = fakeStore(); const app = createApp({ sheetStore: store, providerClient: fakeProviders({ failFile: 'bad.wav' }) }); const agent = request.agent(app); await login(agent);
+  const store = fakeStore(); const app = createApp({ dataStore: store, providerClient: fakeProviders({ failFile: 'bad.wav' }) }); const agent = request.agent(app); await login(agent);
   const response = await agent.post('/api/analyze').send(payload({ audioFiles: ['good.wav', 'bad.wav'].map(name => ({ name, mimeType: 'audio/wav', data: Buffer.from(name).toString('base64') })) }));
   assert.equal(response.status, 200); assert.equal(response.body.partial, true); assert.equal(response.body.items[1].status, 'failed'); assert.equal(store.writes.length, 1); assert.equal(store.users[0].usage, 1);
 });
 
-test('sheet write failure returns reports with a prominent unsaved status', async () => {
-  const app = createApp({ sheetStore: fakeStore({ writeFailure: true }), providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
+test('database write failure returns reports with a prominent unsaved status', async () => {
+  const app = createApp({ dataStore: fakeStore({ writeFailure: true }), providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
   const response = await agent.post('/api/analyze').send(payload()); assert.equal(response.status, 200); assert.equal(response.body.auditResultWrite.status, 'failed'); assert.equal(response.body.partial, true); assert.match(response.body.auditResultWrite.message, /not saved/);
 });
 
 test('malformed live rubric stops before AI calls and writes', async () => {
-  const store = fakeStore({ malformedRubric: true }); const providers = fakeProviders(); const app = createApp({ sheetStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const store = fakeStore({ malformedRubric: true }); const providers = fakeProviders(); const app = createApp({ dataStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
   const response = await agent.post('/api/analyze').send(payload()); assert.equal(response.status, 503); assert.equal(providers.calls.length, 0); assert.equal(store.writes.length, 0);
 });
 
 test('summary-only modes are cached and never write history', async () => {
-  const store = fakeStore(); const providers = fakeProviders(); const app = createApp({ sheetStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const store = fakeStore(); const providers = fakeProviders(); const app = createApp({ dataStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
   const voice1 = await agent.post('/api/analyze').send(payload({ mode: 'voice', parameter: '' })); const voice2 = await agent.post('/api/analyze').send(payload({ mode: 'voice', parameter: '' })); assert.equal(voice1.status, 200); assert.equal(voice2.body.cached, true);
   const coaching = await agent.post('/api/analyze').send(payload({ mode: 'coaching' })); assert.equal(coaching.status, 200); assert.equal(store.writes.length, 0); assert.equal(providers.calls.length, 2); assert.equal(store.users[0].usage, 2);
 });
 
+test('queued analysis persists job state, deduplicates active work, and reuses the persistent cache', async () => {
+  const store = queuedStore(); const providers = fakeProviders({ delayMs: 20 }); const app = createApp({ dataStore: store, providerClient: providers, queueOptions: { minStartIntervalMs: 1, cooldownMs: 1, pollMs: 1 } }); const agent = request.agent(app); await login(agent);
+  const first = await agent.post('/api/analyze').send(payload()); assert.equal(first.status, 202); assert.ok(first.body.jobId);
+  const duplicate = await agent.post('/api/analyze').send(payload()); assert.equal(duplicate.status, 202); assert.equal(duplicate.body.jobId, first.body.jobId); assert.equal(duplicate.body.deduplicated, true);
+  let job;
+  for (let attempt = 0; attempt < 100; attempt += 1) { job = await agent.get(`/api/analysis-jobs/${first.body.jobId}`); if (job.body.status === 'complete') break; await new Promise(resolve => setTimeout(resolve, 2)); }
+  assert.equal(job.body.status, 'complete'); assert.equal(job.body.result.items[0].score, 9); assert.equal(providers.calls.length, 1); assert.equal(store.writes.length, 1);
+  const cached = await agent.post('/api/analyze').send(payload()); assert.equal(cached.status, 200); assert.equal(cached.body.cached, true); assert.equal(providers.calls.length, 1); assert.equal(store.writes.length, 1);
+});
+
 test('rejects invalid providers/audio and does not expose project files', async () => {
-  const app = createApp({ sheetStore: fakeStore(), providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
+  const app = createApp({ dataStore: fakeStore(), providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
   assert.equal((await agent.post('/api/analyze').send(payload({ provider: 'custom' }))).status, 400);
   assert.equal((await agent.post('/api/analyze').send(payload({ audioFiles: [{ data: 'x', mimeType: 'text/plain' }] }))).status, 400);
   assert.equal((await request(app).get('/package.json')).status, 404);

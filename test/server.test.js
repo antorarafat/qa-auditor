@@ -272,7 +272,7 @@ test('sends full JSON Schema through Gemini responseJsonSchema, not the legacy O
 test('plain Markdown Gemini calls omit the structured-output schema', async () => {
   let requestBody;
   const client = createProviderClient({
-    geminiQaModels: ['gemini-test'], geminiMaxRounds: 1,
+    geminiModels: ['gemini-test'], geminiMaxRounds: 1,
     fetchImpl: async (_url, options) => { requestBody = JSON.parse(options.body); return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '# Audit report' }] } }] }; } }; }
   });
   assert.equal(await client.callMarkdown('gemini', 'test-key', [], 'Return Markdown.'), '# Audit report');
@@ -284,21 +284,22 @@ test('plain Markdown Gemini calls omit the structured-output schema', async () =
 test('QA Markdown makes one Gemini request without fallback or retry amplification', async () => {
   let requests = 0;
   const client = createProviderClient({
-    geminiQaModels: ['gemini-3.6-flash', 'gemini-3.5-flash-lite'], geminiMaxRounds: 3,
+    geminiModels: ['gemini-3.6-flash', 'gemini-3.5-flash-lite'], geminiMaxRounds: 3,
     fetchImpl: async () => { requests += 1; return { ok: false, status: 429, headers: { get: () => '0' }, async json() { return { error: { message: 'Quota exceeded' } }; } }; }
   });
   await assert.rejects(client.callMarkdown('gemini', 'test-key', [], 'Return Markdown.'), error => error.errorCode === 'rate_limited');
   assert.equal(requests, 1);
 });
 
-test('summary-only structured tasks route to Flash-Lite before the heavy model', async () => {
+test('Customer Voice and Advisor Coaching use 3.6 Flash without a lighter-model downgrade', async () => {
   const requestedModels = [];
   const client = createProviderClient({
-    geminiModels: ['heavy-model'], geminiLightModels: ['light-model', 'heavy-model'], geminiMaxRounds: 1,
+    geminiModels: ['gemini-3.6-flash', 'gemini-3.5-flash-lite'], geminiMaxRounds: 3,
     fetchImpl: async url => { requestedModels.push(url); return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } }; }
   });
-  await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object' }, { task: 'light' });
-  assert.match(requestedModels[0], /light-model/);
+  await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object' });
+  assert.equal(requestedModels.length, 1);
+  assert.match(requestedModels[0], /gemini-3\.6-flash/);
 });
 
 test('makes the live CE rules and rudeness zero-score override explicit', () => {
@@ -312,7 +313,7 @@ test('makes the live CE rules and rudeness zero-score override explicit', () => 
   assert.match(prompt, /award its full maximum score/);
 });
 
-test('uses Gemini 3.6 Flash and then 3.5 Flash-Lite with no incompatible middle model', async () => {
+test('uses Gemini 3.6 Flash as the only default evaluation model', async () => {
   const previous = process.env.GEMINI_MODELS;
   delete process.env.GEMINI_MODELS;
   const requestedModels = [];
@@ -320,7 +321,6 @@ test('uses Gemini 3.6 Flash and then 3.5 Flash-Lite with no incompatible middle 
     const client = createProviderClient({
       fetchImpl: async url => {
         requestedModels.push(url);
-        if (requestedModels.length === 1) return { ok: false, status: 429, async json() { return { error: { message: 'Quota exceeded' } }; } };
         return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
       }
     });
@@ -330,7 +330,7 @@ test('uses Gemini 3.6 Flash and then 3.5 Flash-Lite with no incompatible middle 
     else process.env.GEMINI_MODELS = previous;
   }
   assert.match(requestedModels[0], /gemini-3\.6-flash/);
-  assert.match(requestedModels[1], /gemini-3\.5-flash-lite:generateContent/);
+  assert.equal(requestedModels.length, 1);
 });
 
 test('falls back to the next Gemini model on quota or temporary provider errors', async () => {
@@ -343,7 +343,7 @@ test('falls back to the next Gemini model on quota or temporary provider errors'
       return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
     }
   });
-  const result = await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object', properties: { status: { type: 'string' } } });
+  const result = await client.callGemini('test-key', [], 'Return ok.', { type: 'object', properties: { status: { type: 'string' } } });
   assert.deepEqual(result, { status: 'ok' });
   assert.equal(requestedModels.length, 2);
   assert.match(requestedModels[1], /fallback-model/);
@@ -359,7 +359,7 @@ test('falls back when a Gemini model rejects the structured schema', async () =>
       return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
     }
   });
-  const result = await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object', properties: { status: { type: 'string' } } });
+  const result = await client.callGemini('test-key', [], 'Return ok.', { type: 'object', properties: { status: { type: 'string' } } });
   assert.deepEqual(result, { status: 'ok' });
   assert.equal(requestedModels.length, 2);
 });
@@ -376,7 +376,7 @@ test('retries a fully rate-limited Gemini round within the bounded deadline', as
       return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
     }
   });
-  assert.deepEqual(await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object' }), { status: 'ok' });
+  assert.deepEqual(await client.callGemini('test-key', [], 'Return ok.', { type: 'object' }), { status: 'ok' });
   assert.equal(requests, 2);
   assert.deepEqual(delays, [1]);
 });
@@ -391,7 +391,7 @@ test('abandons a stalled Gemini model and continues to the fallback', async () =
       return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
     }
   });
-  assert.deepEqual(await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object' }), { status: 'ok' });
+  assert.deepEqual(await client.callGemini('test-key', [], 'Return ok.', { type: 'object' }), { status: 'ok' });
   assert.equal(requestedModels.length, 2);
 });
 

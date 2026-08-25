@@ -14,12 +14,12 @@ const DIST_DIR = path.join(ROOT, 'dist');
 const DIST_INDEX_PATH = path.join(DIST_DIR, 'index.html');
 const TEMPLATE_DIR = process.env.TEMPLATE_DIR || path.join(ROOT, 'templates');
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash'];
 const DEFAULT_OPENAI_MODELS = ['gpt-4o-audio-preview', 'gpt-4o-mini-audio-preview'];
-const DEFAULT_GEMINI_DEADLINE_MS = 90 * 1000;
-const DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS = 45 * 1000;
+const DEFAULT_GEMINI_DEADLINE_MS = 180 * 1000;
+const DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS = 170 * 1000;
 const DEFAULT_GEMINI_RETRY_DELAY_MS = 15 * 1000;
-const DEFAULT_GEMINI_MAX_ROUNDS = 2;
+const DEFAULT_GEMINI_MAX_ROUNDS = 1;
 
 function envNumber(name, fallback) { const value = Number.parseInt(process.env[name] || '', 10); return Number.isFinite(value) && value > 0 ? value : fallback; }
 function envList(name, fallback) { const value = (process.env[name] || '').split(',').map(item => item.trim()).filter(Boolean); return value.length ? value : fallback; }
@@ -165,15 +165,11 @@ function createProviderClient(config = {}) {
   const fetchImpl = config.fetchImpl || fetch;
   const sleepImpl = config.sleepImpl || (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)));
   const geminiModels = config.geminiModels || envList('GEMINI_MODELS', DEFAULT_GEMINI_MODELS);
-  const geminiQaModels = config.geminiQaModels || envList('GEMINI_QA_MODELS', geminiModels);
-  const geminiLightModels = config.geminiLightModels || envList('GEMINI_LIGHT_MODELS', ['gemini-3.5-flash-lite', 'gemini-3.6-flash']);
   const openaiModels = config.openaiModels || envList('OPENAI_MODELS', DEFAULT_OPENAI_MODELS);
   const geminiDeadlineMs = config.geminiDeadlineMs ?? envNumber('GEMINI_CALL_DEADLINE_MS', DEFAULT_GEMINI_DEADLINE_MS);
   const geminiAttemptTimeoutMs = config.geminiAttemptTimeoutMs ?? envNumber('GEMINI_ATTEMPT_TIMEOUT_MS', DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS);
   const geminiRetryDelayMs = config.geminiRetryDelayMs ?? envNumber('GEMINI_RETRY_DELAY_MS', DEFAULT_GEMINI_RETRY_DELAY_MS);
   const geminiMaxRounds = config.geminiMaxRounds ?? envNumber('GEMINI_MAX_ROUNDS', DEFAULT_GEMINI_MAX_ROUNDS);
-  const geminiQaDeadlineMs = config.geminiQaDeadlineMs ?? envNumber('GEMINI_QA_DEADLINE_MS', 180000);
-  const geminiQaAttemptTimeoutMs = config.geminiQaAttemptTimeoutMs ?? envNumber('GEMINI_QA_ATTEMPT_TIMEOUT_MS', 170000);
   async function callGemini(apiKey, audioFiles, prompt, schema, models = geminiModels, callOptions = {}) {
     const generationConfig = { temperature: 0 };
     if (schema) { generationConfig.responseMimeType = 'application/json'; generationConfig.responseJsonSchema = schema; }
@@ -280,8 +276,8 @@ function createProviderClient(config = {}) {
     throw providerError(lastError, /quota|rate limit/i.test(lastError) ? 'rate_limited' : 'provider_unavailable', true);
   }
   return {
-    async callStructured(provider, key, files, prompt, schema, options = {}) { return provider === 'gemini' ? callGemini(key, files, prompt, schema, options.task === 'light' ? geminiLightModels : geminiModels) : callOpenAI(key, files, prompt, schema); },
-    async callMarkdown(provider, key, files, prompt) { return provider === 'gemini' ? callGemini(key, files, prompt, null, geminiQaModels.slice(0, 1), { deadlineMs: geminiQaDeadlineMs, attemptTimeoutMs: geminiQaAttemptTimeoutMs, maxRounds: 1 }) : callOpenAIMarkdown(key, files, prompt); },
+    async callStructured(provider, key, files, prompt, schema) { return provider === 'gemini' ? callGemini(key, files, prompt, schema, geminiModels.slice(0, 1), { maxRounds: 1 }) : callOpenAI(key, files, prompt, schema); },
+    async callMarkdown(provider, key, files, prompt) { return provider === 'gemini' ? callGemini(key, files, prompt, null, geminiModels.slice(0, 1), { maxRounds: 1 }) : callOpenAIMarkdown(key, files, prompt); },
     callGemini, callOpenAI, callOpenAIMarkdown
   };
 }
@@ -449,7 +445,7 @@ function createApp(options = {}) {
         if (!responseBody.partial) analysisCache.set(cacheKey, responseBody);
       } else {
         const prompt = mode === 'voice' ? voicePrompt(user.companyName, products, audioFiles.length) : coachingPrompt(user.companyName, rubric, products, audioFiles.length); const schema = mode === 'voice' ? pipeline.VOICE_SCHEMA : pipeline.COACHING_SCHEMA; const template = templates[mode]; const cacheKey = analysisCacheKey(user, provider, `${prompt}\n${template}`, audioFiles); const cached = analysisCache.get(cacheKey); if (cached) return res.json({ ...cached, cached: true });
-        const structured = await providerClient.callStructured(provider, apiKey, audioFiles, prompt, schema, { task: 'light' }); const markdown = mode === 'voice' ? pipeline.renderVoice(template, pipeline.validateVoiceResult(structured), audioFiles.length) : pipeline.renderCoaching(template, pipeline.validateCoachingResult(structured), user.companyName); responseBody = { mode, items: [{ kind: mode, status: 'success', markdown }], report: markdown, partial: false, auditResultWrite: { status: 'not_applicable', savedRows: 0 }, cached: false }; analysisCache.set(cacheKey, responseBody);
+        const structured = await providerClient.callStructured(provider, apiKey, audioFiles, prompt, schema); const markdown = mode === 'voice' ? pipeline.renderVoice(template, pipeline.validateVoiceResult(structured), audioFiles.length) : pipeline.renderCoaching(template, pipeline.validateCoachingResult(structured), user.companyName); responseBody = { mode, items: [{ kind: mode, status: 'success', markdown }], report: markdown, partial: false, auditResultWrite: { status: 'not_applicable', savedRows: 0 }, cached: false }; analysisCache.set(cacheKey, responseBody);
       }
       const previous = usageLocks.get(user.email) || Promise.resolve(); const next = previous.catch(() => {}).then(() => sheetStore.incrementUsage(user.email)); usageLocks.set(user.email, next); await next.catch(error => console.error('Usage update failed:', error.message)); if (usageLocks.get(user.email) === next) usageLocks.delete(user.email); return res.json(responseBody);
     } catch (error) { console.error('Analysis failed:', error.message); if (/rubric|template|placeholder/i.test(error.message)) return res.status(503).json({ error: error.message, errorCode: 'configuration_error', retryable: false }); return res.status(502).json(safeProviderFailure(error)); }

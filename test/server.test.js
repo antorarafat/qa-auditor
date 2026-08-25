@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const request = require('supertest');
 const { createApp, createProviderClient, rowsToUsers, rowsToProductBriefs, parseQaRubric } = require('../server');
-const { loadTemplate, renderTemplate, validateQaResult } = require('../lib/audit-pipeline');
+const { loadTemplate, renderTemplate, validateQaResult, qaSchema } = require('../lib/audit-pipeline');
 
 const RUBRIC = `১. Greetings (৫ নম্বর)\n- Greetings (২)\n- Permission (৩)\n\n২. Closing (৫ নম্বর)\n- Summary (২)\n- Goodbye (৩)\n\nCritical Errors\n- Wrong information\n- Rudeness`;
 
@@ -74,6 +74,23 @@ test('reconciles raw points and zeros only the CE final score', () => {
   assert.throws(() => validateQaResult(qaResult({ scores: qaResult().scores.slice(1) }), rubric), /required/);
 });
 
+test('accepts empty optional QA narratives and derives safe report content from scores', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const result = validateQaResult(qaResult({ deduction_justifications: [], strengths: [], actionable_tips: [] }), rubric);
+  assert.match(result.deductionJustifications[0], /Permission/);
+  assert.ok(result.strengths.length > 0);
+  assert.ok(result.actionableTips.length > 0);
+});
+
+test('constrains every Gemini score position to the exact live rubric row and weight', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const schema = qaSchema(rubric).properties.scores;
+  assert.equal(schema.prefixItems.length, rubric.rows.length);
+  assert.deepEqual(schema.prefixItems[1].properties.category.enum, ['Greetings']);
+  assert.deepEqual(schema.prefixItems[1].properties.parameter.enum, ['Permission']);
+  assert.deepEqual(schema.prefixItems[1].properties.maximum.enum, [3]);
+});
+
 test('validates placeholders and reloads templates from disk', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-template-'));
   fs.writeFileSync(path.join(dir, 'customer_voice_template.md'), '{{total_calls_analyzed}} {{advisors_list}} {{overall_sentiment}} {{customer_profile}} {{customer_need}} {{customer_questions_list}} {{barriers_list}} {{product_feedback_list}} {{advisor_name}} {{objection_handling_assessment}} {{improvement_areas}} {{actionable_recommendations}}');
@@ -99,12 +116,35 @@ test('sends full JSON Schema through Gemini responseJsonSchema, not the legacy O
   assert.equal('responseSchema' in requestBody.generationConfig, false);
 });
 
+test('falls back to the next Gemini model on quota or temporary provider errors', async () => {
+  const requestedModels = [];
+  const client = createProviderClient({
+    geminiModels: ['primary-model', 'fallback-model'],
+    fetchImpl: async url => {
+      requestedModels.push(url);
+      if (url.includes('primary-model')) return { ok: false, status: 503, async json() { return { error: { message: 'High demand' } }; } };
+      return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
+    }
+  });
+  const result = await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object', properties: { status: { type: 'string' } } });
+  assert.deepEqual(result, { status: 'ok' });
+  assert.equal(requestedModels.length, 2);
+  assert.match(requestedModels[1], /fallback-model/);
+});
+
 test('auth config returns parameters and session/default behavior without secrets', async () => {
   const store = fakeStore(); const app = createApp({ sheetStore: store, providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
   const config = await agent.get('/api/audit-config'); assert.equal(config.status, 200); assert.deepEqual(config.body.parameters, ['Outbound', 'Inbound']); assert.equal(config.body.activeParameter, 'Outbound'); assert.equal('scorecard' in config.body, false); assert.equal(JSON.stringify(config.body).includes('secret'), false);
   assert.equal((await agent.put('/api/session/parameter').send({ parameter: 'Inbound' })).status, 200);
   assert.equal((await agent.get('/api/audit-config')).body.activeParameter, 'Inbound'); assert.equal(store.users[0].defaultParameter, 'Outbound');
   assert.equal((await agent.put('/api/user/default-parameter').send({ parameter: 'Inbound' })).status, 200); assert.equal(store.users[0].defaultParameter, 'Inbound');
+});
+
+test('trusts one configured proxy hop for Cloudflare forwarded client addresses', async () => {
+  const app = createApp({ sheetStore: fakeStore(), providerClient: fakeProviders(), trustProxy: 1 });
+  assert.equal(app.get('trust proxy'), 1);
+  const response = await request(app).post('/api/login').set('X-Forwarded-For', '203.0.113.10').send({ email: 'user@example.com', password: 'plain-password' });
+  assert.equal(response.status, 200);
 });
 
 test('requires parameter for QA and coaching but ignores it for Customer Voice', async () => {

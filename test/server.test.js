@@ -189,7 +189,7 @@ test('makes the live CE rules and rudeness zero-score override explicit', () => 
   assert.match(prompt, /award its full maximum score/);
 });
 
-test('uses full Gemini Flash before Flash Lite when the primary model is unavailable', async () => {
+test('uses Gemini 3.6 Flash and then 3.5 Flash-Lite with no incompatible middle model', async () => {
   const previous = process.env.GEMINI_MODELS;
   delete process.env.GEMINI_MODELS;
   const requestedModels = [];
@@ -207,8 +207,7 @@ test('uses full Gemini Flash before Flash Lite when the primary model is unavail
     else process.env.GEMINI_MODELS = previous;
   }
   assert.match(requestedModels[0], /gemini-3\.6-flash/);
-  assert.match(requestedModels[1], /gemini-3\.5-flash:generateContent/);
-  assert.doesNotMatch(requestedModels[1], /flash-lite/);
+  assert.match(requestedModels[1], /gemini-3\.5-flash-lite:generateContent/);
 });
 
 test('falls back to the next Gemini model on quota or temporary provider errors', async () => {
@@ -225,6 +224,62 @@ test('falls back to the next Gemini model on quota or temporary provider errors'
   assert.deepEqual(result, { status: 'ok' });
   assert.equal(requestedModels.length, 2);
   assert.match(requestedModels[1], /fallback-model/);
+});
+
+test('falls back when a Gemini model rejects the structured schema', async () => {
+  const requestedModels = [];
+  const client = createProviderClient({
+    geminiModels: ['schema-incompatible', 'working-model'], geminiMaxRounds: 1,
+    fetchImpl: async url => {
+      requestedModels.push(url);
+      if (url.includes('schema-incompatible')) return { ok: false, status: 400, async json() { return { error: { message: 'Request contains an invalid argument.' } }; } };
+      return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
+    }
+  });
+  const result = await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object', properties: { status: { type: 'string' } } });
+  assert.deepEqual(result, { status: 'ok' });
+  assert.equal(requestedModels.length, 2);
+});
+
+test('retries a fully rate-limited Gemini round within the bounded deadline', async () => {
+  let requests = 0;
+  const delays = [];
+  const client = createProviderClient({
+    geminiModels: ['primary-model'], geminiMaxRounds: 2, geminiRetryDelayMs: 1, geminiDeadlineMs: 1000,
+    sleepImpl: async milliseconds => { delays.push(milliseconds); },
+    fetchImpl: async () => {
+      requests += 1;
+      if (requests === 1) return { ok: false, status: 429, headers: { get: () => '0' }, async json() { return { error: { message: 'Quota exceeded' } }; } };
+      return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
+    }
+  });
+  assert.deepEqual(await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object' }), { status: 'ok' });
+  assert.equal(requests, 2);
+  assert.deepEqual(delays, [1]);
+});
+
+test('abandons a stalled Gemini model and continues to the fallback', async () => {
+  const requestedModels = [];
+  const client = createProviderClient({
+    geminiModels: ['stalled-model', 'fallback-model'], geminiMaxRounds: 1, geminiAttemptTimeoutMs: 5, geminiDeadlineMs: 100,
+    fetchImpl: async (url, options) => {
+      requestedModels.push(url);
+      if (url.includes('stalled-model')) return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => { const error = new Error('aborted'); error.name = 'AbortError'; reject(error); }, { once: true }));
+      return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
+    }
+  });
+  assert.deepEqual(await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object' }), { status: 'ok' });
+  assert.equal(requestedModels.length, 2);
+});
+
+test('stops immediately when Gemini credentials are rejected', async () => {
+  let requests = 0;
+  const client = createProviderClient({
+    geminiModels: ['first-model', 'second-model'], geminiMaxRounds: 2,
+    fetchImpl: async () => { requests += 1; return { ok: false, status: 401, async json() { return { error: { message: 'Invalid API key' } }; } }; }
+  });
+  await assert.rejects(client.callStructured('gemini', 'bad-key', [], 'Return ok.', { type: 'object' }), error => error.errorCode === 'invalid_credentials' && error.retryable === false);
+  assert.equal(requests, 1);
 });
 
 test('auth config returns parameters and session/default behavior without secrets', async () => {
@@ -247,6 +302,26 @@ test('requires parameter for QA and coaching but ignores it for Customer Voice',
   assert.equal((await agent.post('/api/analyze').send(payload({ parameter: '' }))).status, 400);
   assert.equal((await agent.post('/api/analyze').send(payload({ mode: 'coaching', parameter: '' }))).status, 400);
   const voice = await agent.post('/api/analyze').send(payload({ mode: 'voice', parameter: 'Does not exist' })); assert.equal(voice.status, 200); assert.equal(providers.calls[0].prompt.includes('LIVE RUBRIC'), false);
+});
+
+test('one-call QA uses one AI request while still returning the call and summary cards', async () => {
+  const store = fakeStore(); const providers = fakeProviders(); const app = createApp({ sheetStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const response = await agent.post('/api/analyze').send(payload());
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.items.map(item => item.kind), ['call', 'summary']);
+  assert.equal(providers.calls.length, 1);
+  assert.match(response.body.items[1].markdown, /call\.wav: 9\/10/);
+  assert.equal(store.writes.length, 1);
+});
+
+test('provider failures expose a safe machine-readable reason and retry flag', async () => {
+  const providerClient = { async callStructured() { const error = new Error('secret upstream detail'); error.errorCode = 'rate_limited'; error.retryable = true; error.providerStatus = 429; throw error; } };
+  const app = createApp({ sheetStore: fakeStore(), providerClient }); const agent = request.agent(app); await login(agent);
+  const response = await agent.post('/api/analyze').send(payload());
+  assert.equal(response.status, 502);
+  assert.equal(response.body.errorCode, 'rate_limited');
+  assert.equal(response.body.retryable, true);
+  assert.doesNotMatch(JSON.stringify(response.body), /secret upstream detail/);
 });
 
 test('QA analyzes each file, renders ordered items, appends exact A:K rows, and never caches re-audits', async () => {

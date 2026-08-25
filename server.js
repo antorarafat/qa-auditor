@@ -14,8 +14,12 @@ const DIST_DIR = path.join(ROOT, 'dist');
 const DIST_INDEX_PATH = path.join(DIST_DIR, 'index.html');
 const TEMPLATE_DIR = process.env.TEMPLATE_DIR || path.join(ROOT, 'templates');
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
+const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite'];
 const DEFAULT_OPENAI_MODELS = ['gpt-4o-audio-preview', 'gpt-4o-mini-audio-preview'];
+const DEFAULT_GEMINI_DEADLINE_MS = 90 * 1000;
+const DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS = 45 * 1000;
+const DEFAULT_GEMINI_RETRY_DELAY_MS = 15 * 1000;
+const DEFAULT_GEMINI_MAX_ROUNDS = 2;
 
 function envNumber(name, fallback) { const value = Number.parseInt(process.env[name] || '', 10); return Number.isFinite(value) && value > 0 ? value : fallback; }
 function envList(name, fallback) { const value = (process.env[name] || '').split(',').map(item => item.trim()).filter(Boolean); return value.length ? value : fallback; }
@@ -124,17 +128,132 @@ function isSameOrigin(req, allowedOrigins) { const origin = req.get('origin'); r
 function validateAudioFiles(files) { if (!Array.isArray(files) || !files.length) throw new Error('Upload at least one audio file.'); return files.map(file => { if (!file || typeof file.data !== 'string' || !String(file.mimeType || '').startsWith('audio/')) throw new Error('Only audio files are supported.'); const bytes = Math.ceil(Buffer.byteLength(file.data, 'base64')); if (!Number.isFinite(bytes) || bytes <= 0) throw new Error('Invalid audio data.'); return { data: file.data, mimeType: String(file.mimeType), name: String(file.name || 'audio').slice(0, 200) }; }); }
 function parseJsonText(text) { const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''); try { return JSON.parse(cleaned); } catch { throw new Error('The AI returned malformed structured JSON.'); } }
 
+function providerError(message, errorCode, retryable, providerStatus, attempts = []) {
+  const error = new Error(message);
+  error.errorCode = errorCode;
+  error.retryable = retryable;
+  if (Number.isInteger(providerStatus)) error.providerStatus = providerStatus;
+  error.attempts = attempts;
+  return error;
+}
+
+function safeProviderFailure(error) {
+  const code = String(error?.errorCode || 'provider_failed');
+  const messages = {
+    rate_limited: 'The AI service is temporarily rate limited. Please try again shortly.',
+    provider_incompatible: 'The configured AI models could not accept this report format.',
+    provider_timeout: 'The AI service took too long to respond. Please try again.',
+    provider_network: 'The AI service could not be reached. Please try again.',
+    invalid_credentials: 'The configured AI credential is invalid or does not have access.',
+    provider_unavailable: 'The AI service is temporarily unavailable. Please try again.',
+    invalid_response: 'The AI returned an invalid report. Please run the call again.',
+    request_rejected: 'The AI service rejected this request.'
+  };
+  return { error: messages[code] || 'The AI analysis could not be completed.', errorCode: code, retryable: error?.retryable === true };
+}
+
+function retryAfterMilliseconds(response) {
+  const value = response?.headers?.get?.('retry-after');
+  if (!value) return 0;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : 0;
+}
+
 function createProviderClient(config = {}) {
-  const fetchImpl = config.fetchImpl || fetch; const geminiModels = config.geminiModels || envList('GEMINI_MODELS', DEFAULT_GEMINI_MODELS); const openaiModels = config.openaiModels || envList('OPENAI_MODELS', DEFAULT_OPENAI_MODELS);
+  const fetchImpl = config.fetchImpl || fetch;
+  const sleepImpl = config.sleepImpl || (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)));
+  const geminiModels = config.geminiModels || envList('GEMINI_MODELS', DEFAULT_GEMINI_MODELS);
+  const openaiModels = config.openaiModels || envList('OPENAI_MODELS', DEFAULT_OPENAI_MODELS);
+  const geminiDeadlineMs = config.geminiDeadlineMs ?? envNumber('GEMINI_CALL_DEADLINE_MS', DEFAULT_GEMINI_DEADLINE_MS);
+  const geminiAttemptTimeoutMs = config.geminiAttemptTimeoutMs ?? envNumber('GEMINI_ATTEMPT_TIMEOUT_MS', DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS);
+  const geminiRetryDelayMs = config.geminiRetryDelayMs ?? envNumber('GEMINI_RETRY_DELAY_MS', DEFAULT_GEMINI_RETRY_DELAY_MS);
+  const geminiMaxRounds = config.geminiMaxRounds ?? envNumber('GEMINI_MAX_ROUNDS', DEFAULT_GEMINI_MAX_ROUNDS);
   async function callGemini(apiKey, audioFiles, prompt, schema) {
-    const payload = { contents: [{ parts: [{ text: prompt }, ...audioFiles.map(file => ({ inlineData: { mimeType: file.mimeType, data: file.data } }))] }], generationConfig: { temperature: 0, responseMimeType: 'application/json', responseJsonSchema: schema } }; let lastError = 'No supported Gemini model responded.'; let lastStatus;
-    for (const model of geminiModels) { const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(payload) }); const data = await response.json().catch(() => ({})); if (response.ok) { const text = data.candidates?.[0]?.content?.parts?.find(part => part.text)?.text; if (text) return parseJsonText(text); lastError = 'Gemini returned no structured result.'; continue; } const message = String(data.error?.message || 'Gemini request failed'); console.error(`Gemini model ${model} returned HTTP ${response.status}: ${message.replace(/\s+/g, ' ').slice(0, 300)}`); if (response.status === 404 || response.status === 429 || response.status >= 500 || /not found|deprecated|not supported/i.test(message)) { lastError = message; lastStatus = response.status; continue; } const error = new Error(`Gemini request rejected (HTTP ${response.status}).`); error.providerStatus = response.status; throw error; }
-    const error = new Error(lastError); if (lastStatus) error.providerStatus = lastStatus; throw error;
+    const payload = { contents: [{ parts: [{ text: prompt }, ...audioFiles.map(file => ({ inlineData: { mimeType: file.mimeType, data: file.data } }))] }], generationConfig: { temperature: 0, responseMimeType: 'application/json', responseJsonSchema: schema } };
+    const deadline = Date.now() + geminiDeadlineMs;
+    const incompatibleModels = new Set();
+    const attempts = [];
+    let lastFailure = providerError('No supported Gemini model responded.', 'provider_unavailable', true, undefined, attempts);
+    let requestedRetryAfterMs = 0;
+
+    for (let round = 0; round < geminiMaxRounds; round += 1) {
+      for (const model of geminiModels) {
+        if (incompatibleModels.has(model)) continue;
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw providerError('Gemini call deadline exceeded.', 'provider_timeout', true, undefined, attempts);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), Math.min(geminiAttemptTimeoutMs, remaining));
+        let response;
+        try {
+          response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(payload), signal: controller.signal });
+        } catch (error) {
+          const timedOut = controller.signal.aborted || error?.name === 'AbortError';
+          const code = timedOut ? 'provider_timeout' : 'provider_network';
+          attempts.push({ model, round: round + 1, errorCode: code });
+          console.error(`Gemini model ${model} ${timedOut ? 'timed out' : 'network request failed'}.`);
+          lastFailure = providerError(timedOut ? 'Gemini request timed out.' : 'Gemini network request failed.', code, true, undefined, attempts);
+          continue;
+        } finally {
+          clearTimeout(timeout);
+        }
+
+        const data = await response.json().catch(() => ({}));
+        if (response.ok) {
+          const text = data.candidates?.[0]?.content?.parts?.find(part => part.text)?.text;
+          if (text) {
+            try { return parseJsonText(text); }
+            catch { attempts.push({ model, round: round + 1, errorCode: 'invalid_response' }); lastFailure = providerError('Gemini returned malformed structured JSON.', 'invalid_response', true, response.status, attempts); continue; }
+          }
+          attempts.push({ model, round: round + 1, errorCode: 'invalid_response', status: response.status });
+          lastFailure = providerError('Gemini returned no structured result.', 'invalid_response', true, response.status, attempts);
+          continue;
+        }
+
+        const message = String(data.error?.message || 'Gemini request failed');
+        const normalizedMessage = message.replace(/\s+/g, ' ');
+        console.error(`Gemini model ${model} returned HTTP ${response.status}: ${normalizedMessage.slice(0, 300)}`);
+        if (response.status === 401 || response.status === 403) throw providerError('Gemini credential rejected.', 'invalid_credentials', false, response.status, attempts.concat({ model, round: round + 1, errorCode: 'invalid_credentials', status: response.status }));
+        if (response.status === 400 && /invalid argument|response.*schema|json schema/i.test(message)) {
+          incompatibleModels.add(model);
+          attempts.push({ model, round: round + 1, errorCode: 'provider_incompatible', status: response.status });
+          lastFailure = providerError('Gemini model rejected the structured report schema.', 'provider_incompatible', false, response.status, attempts);
+          continue;
+        }
+        if (response.status === 404 || /not found|deprecated|not supported/i.test(message)) {
+          incompatibleModels.add(model);
+          attempts.push({ model, round: round + 1, errorCode: 'provider_incompatible', status: response.status });
+          lastFailure = providerError('Gemini model is unavailable or incompatible.', 'provider_incompatible', false, response.status, attempts);
+          continue;
+        }
+        if (response.status === 429) {
+          requestedRetryAfterMs = Math.max(requestedRetryAfterMs, retryAfterMilliseconds(response));
+          attempts.push({ model, round: round + 1, errorCode: 'rate_limited', status: response.status });
+          lastFailure = providerError('Gemini quota or rate limit exceeded.', 'rate_limited', true, response.status, attempts);
+          continue;
+        }
+        if (response.status >= 500) {
+          attempts.push({ model, round: round + 1, errorCode: 'provider_unavailable', status: response.status });
+          lastFailure = providerError('Gemini is temporarily unavailable.', 'provider_unavailable', true, response.status, attempts);
+          continue;
+        }
+        throw providerError(`Gemini request rejected (HTTP ${response.status}).`, 'request_rejected', false, response.status, attempts.concat({ model, round: round + 1, errorCode: 'request_rejected', status: response.status }));
+      }
+
+      if (round + 1 >= geminiMaxRounds || incompatibleModels.size === geminiModels.length) break;
+      const remaining = deadline - Date.now();
+      const delay = Math.min(Math.max(requestedRetryAfterMs, geminiRetryDelayMs * (round + 1)), Math.max(0, remaining - 1));
+      if (delay <= 0) break;
+      await sleepImpl(delay);
+    }
+    if (Date.now() >= deadline && lastFailure.retryable) throw providerError('Gemini call deadline exceeded.', 'provider_timeout', true, lastFailure.providerStatus, attempts);
+    throw lastFailure;
   }
   async function callOpenAI(apiKey, audioFiles, prompt, schema) {
     const content = [{ type: 'text', text: `${prompt}\n\nReturn JSON only matching this schema: ${JSON.stringify(schema)}` }, ...audioFiles.map(file => ({ type: 'input_audio', input_audio: { data: file.data, format: /wav/i.test(`${file.mimeType} ${file.name}`) ? 'wav' : 'mp3' } }))]; let lastError = 'No supported OpenAI model responded.';
-    for (const model of openaiModels) { const response = await fetchImpl('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, modalities: ['text'], response_format: { type: 'json_object' }, messages: [{ role: 'user', content }] }) }); const data = await response.json().catch(() => ({})); if (response.ok) { const text = data.choices?.[0]?.message?.content; if (text) return parseJsonText(text); lastError = 'OpenAI returned no structured result.'; continue; } const message = String(data.error?.message || 'OpenAI request failed'); console.error(`OpenAI model ${model} returned HTTP ${response.status}: ${message.replace(/\s+/g, ' ').slice(0, 300)}`); if (response.status === 404 || response.status === 429 || response.status >= 500 || /not found|deprecated|not supported|model/i.test(message)) { lastError = message; continue; } const error = new Error(`OpenAI request rejected (HTTP ${response.status}).`); error.providerStatus = response.status; throw error; }
-    throw new Error(lastError);
+    for (const model of openaiModels) { const response = await fetchImpl('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, modalities: ['text'], response_format: { type: 'json_object' }, messages: [{ role: 'user', content }] }) }); const data = await response.json().catch(() => ({})); if (response.ok) { const text = data.choices?.[0]?.message?.content; if (text) return parseJsonText(text); lastError = 'OpenAI returned no structured result.'; continue; } const message = String(data.error?.message || 'OpenAI request failed'); console.error(`OpenAI model ${model} returned HTTP ${response.status}: ${message.replace(/\s+/g, ' ').slice(0, 300)}`); if (response.status === 401 || response.status === 403) throw providerError('OpenAI credential rejected.', 'invalid_credentials', false, response.status); if (response.status === 429) { lastError = message; continue; } if (response.status === 404 || response.status >= 500 || /not found|deprecated|not supported|model/i.test(message)) { lastError = message; continue; } throw providerError(`OpenAI request rejected (HTTP ${response.status}).`, 'request_rejected', false, response.status); }
+    throw providerError(lastError, /quota|rate limit/i.test(lastError) ? 'rate_limited' : 'provider_unavailable', true);
   }
   return { async callStructured(provider, key, files, prompt, schema) { return provider === 'gemini' ? callGemini(key, files, prompt, schema) : callOpenAI(key, files, prompt, schema); }, callGemini, callOpenAI };
 }
@@ -174,6 +293,13 @@ LIVE RUBRIC (${rubric.name}):
 ${rubric.source}`;
 }
 function summaryPrompt(company, parameter, results) { const compact = results.map(result => ({ file: result.fileName, agent: result.agentName, score: result.finalScore, ce: result.ceDetected, deductions: result.deductionJustifications })); return `Create a concise Bangla run summary for ${company} using only these validated successful ${parameter} QA results. Identify recurring issues, compare best/worst calls, and give actionable recommendations.\n${JSON.stringify(compact)}`; }
+function singleCallSummary(result) {
+  return {
+    recurringIssues: result.deductionJustifications,
+    bestAndWorstCalls: `${result.fileName}: ${result.finalScore}/${result.maximum}${result.ceDetected ? ' (CE)' : ' (Non-CE)'}`,
+    overallRecommendations: result.actionableTips
+  };
+}
 function voicePrompt(company, products, count) { return `Analyze ${count} calls for ${company} as a Customer Insights analyst. Return one Bangla summary grounded only in the recordings. Include precise timestamps where useful. This is not a QA scorecard and must not score calls.\n\nPRODUCT CONTEXT:\n${productContext(products)}`; }
 function coachingPrompt(company, rubric, products, count) { return `Analyze ${count} calls for ${company} as a senior sales communication coach. Return one Bangla coaching summary with precise [MM:SS] timestamps. Use the selected ${rubric.name} rubric only as coaching context; do not produce scores.\n\nPRODUCT CONTEXT:\n${productContext(products)}\n\nLIVE RUBRIC:\n${rubric.source}`; }
 
@@ -207,10 +333,10 @@ function createApp(options = {}) {
         const items = []; const results = []; const successfulNames = [];
         for (const file of audioFiles) {
           try { const structured = await providerClient.callStructured(provider, apiKey, [file], qaPrompt(user.companyName, rubric, products, file.name), pipeline.qaSchema(rubric)); const result = pipeline.validateQaResult(structured, rubric); const markdown = pipeline.renderQaCall(templates.qaCall, result, user.companyName, evaluationDate); result.fileName = file.name; results.push(result); successfulNames.push(file.name); items.push({ kind: 'call', fileName: file.name, status: 'success', markdown, score: result.finalScore, maximum: result.maximum, ce: result.ceDetected }); }
-          catch (error) { console.error(`Call analysis failed for ${file.name}:`, error.message); items.push({ kind: 'call', fileName: file.name, status: 'failed', error: 'This call could not be evaluated. No Sheet row was created.' }); }
+          catch (error) { const failure = safeProviderFailure(error); console.error(`Call analysis failed for ${file.name}:`, error.message); items.push({ kind: 'call', fileName: file.name, status: 'failed', error: `${failure.error} No Sheet row was created.`, errorCode: failure.errorCode, retryable: failure.retryable }); }
         }
-        if (!results.length) return res.status(502).json({ error: 'None of the uploaded calls could be evaluated.', items, partial: true, auditResultWrite: { status: 'not_saved', savedRows: 0 } });
-        try { const structured = await providerClient.callStructured(provider, apiKey, [], summaryPrompt(user.companyName, parameter, results), pipeline.SUMMARY_SCHEMA); const summary = pipeline.validateSummaryResult(structured); items.push({ kind: 'summary', status: 'success', markdown: pipeline.renderQaSummary(templates.qaSummary, summary, results, successfulNames, user.companyName, parameter, evaluationDate) }); }
+        if (!results.length) { const failureItem = items.find(item => item.status === 'failed') || {}; return res.status(502).json({ error: failureItem.error || 'None of the uploaded calls could be evaluated.', errorCode: failureItem.errorCode || 'provider_failed', retryable: failureItem.retryable === true, items, partial: true, auditResultWrite: { status: 'not_saved', savedRows: 0 } }); }
+        try { const summary = results.length === 1 ? singleCallSummary(results[0]) : pipeline.validateSummaryResult(await providerClient.callStructured(provider, apiKey, [], summaryPrompt(user.companyName, parameter, results), pipeline.SUMMARY_SCHEMA)); items.push({ kind: 'summary', status: 'success', markdown: pipeline.renderQaSummary(templates.qaSummary, summary, results, successfulNames, user.companyName, parameter, evaluationDate) }); }
         catch (error) { console.error('QA run summary failed:', error.message); items.push({ kind: 'summary', status: 'failed', error: 'The run summary could not be generated.' }); }
         let auditResultWrite = { status: 'saved', savedRows: results.length }; try { await sheetStore.appendAuditResults(results.map(result => pipeline.auditResultRow(result, parameter, timestamp))); } catch (error) { console.error('Audit result storage failed:', error.message); auditResultWrite = { status: 'failed', savedRows: 0, message: 'Reports were generated, but the audit results were not saved to Google Sheets.' }; }
         responseBody = { mode, items, report: items.filter(item => item.markdown).map(item => item.markdown).join('\n\n---\n\n'), partial: items.some(item => item.status === 'failed') || auditResultWrite.status === 'failed', auditResultWrite, cached: false };
@@ -219,7 +345,7 @@ function createApp(options = {}) {
         const structured = await providerClient.callStructured(provider, apiKey, audioFiles, prompt, schema); const markdown = mode === 'voice' ? pipeline.renderVoice(template, pipeline.validateVoiceResult(structured), audioFiles.length) : pipeline.renderCoaching(template, pipeline.validateCoachingResult(structured), user.companyName); responseBody = { mode, items: [{ kind: mode, status: 'success', markdown }], report: markdown, partial: false, auditResultWrite: { status: 'not_applicable', savedRows: 0 }, cached: false }; analysisCache.set(cacheKey, responseBody);
       }
       const previous = usageLocks.get(user.email) || Promise.resolve(); const next = previous.catch(() => {}).then(() => sheetStore.incrementUsage(user.email)); usageLocks.set(user.email, next); await next.catch(error => console.error('Usage update failed:', error.message)); if (usageLocks.get(user.email) === next) usageLocks.delete(user.email); return res.json(responseBody);
-    } catch (error) { console.error('Analysis failed:', error.message); if (/rubric|template|placeholder/i.test(error.message)) return res.status(503).json({ error: error.message }); const suffix = Number.isInteger(error.providerStatus) ? ` (provider HTTP ${error.providerStatus})` : ''; return res.status(502).json({ error: `The AI analysis could not be completed${suffix}.` }); }
+    } catch (error) { console.error('Analysis failed:', error.message); if (/rubric|template|placeholder/i.test(error.message)) return res.status(503).json({ error: error.message, errorCode: 'configuration_error', retryable: false }); return res.status(502).json(safeProviderFailure(error)); }
   });
 
   if (fs.existsSync(DIST_INDEX_PATH)) { app.use('/assets', express.static(path.join(DIST_DIR, 'assets'), { index: false })); app.get('/favicon.svg', (req, res) => res.sendFile(path.join(DIST_DIR, 'favicon.svg'))); app.get('/', (req, res) => res.sendFile(DIST_INDEX_PATH)); }

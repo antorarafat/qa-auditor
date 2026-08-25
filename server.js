@@ -165,26 +165,35 @@ function createProviderClient(config = {}) {
   const fetchImpl = config.fetchImpl || fetch;
   const sleepImpl = config.sleepImpl || (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)));
   const geminiModels = config.geminiModels || envList('GEMINI_MODELS', DEFAULT_GEMINI_MODELS);
+  const geminiQaModels = config.geminiQaModels || envList('GEMINI_QA_MODELS', geminiModels);
+  const geminiLightModels = config.geminiLightModels || envList('GEMINI_LIGHT_MODELS', ['gemini-3.5-flash-lite', 'gemini-3.6-flash']);
   const openaiModels = config.openaiModels || envList('OPENAI_MODELS', DEFAULT_OPENAI_MODELS);
   const geminiDeadlineMs = config.geminiDeadlineMs ?? envNumber('GEMINI_CALL_DEADLINE_MS', DEFAULT_GEMINI_DEADLINE_MS);
   const geminiAttemptTimeoutMs = config.geminiAttemptTimeoutMs ?? envNumber('GEMINI_ATTEMPT_TIMEOUT_MS', DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS);
   const geminiRetryDelayMs = config.geminiRetryDelayMs ?? envNumber('GEMINI_RETRY_DELAY_MS', DEFAULT_GEMINI_RETRY_DELAY_MS);
   const geminiMaxRounds = config.geminiMaxRounds ?? envNumber('GEMINI_MAX_ROUNDS', DEFAULT_GEMINI_MAX_ROUNDS);
-  async function callGemini(apiKey, audioFiles, prompt, schema) {
-    const payload = { contents: [{ parts: [{ text: prompt }, ...audioFiles.map(file => ({ inlineData: { mimeType: file.mimeType, data: file.data } }))] }], generationConfig: { temperature: 0, responseMimeType: 'application/json', responseJsonSchema: schema } };
-    const deadline = Date.now() + geminiDeadlineMs;
+  const geminiQaDeadlineMs = config.geminiQaDeadlineMs ?? envNumber('GEMINI_QA_DEADLINE_MS', 180000);
+  const geminiQaAttemptTimeoutMs = config.geminiQaAttemptTimeoutMs ?? envNumber('GEMINI_QA_ATTEMPT_TIMEOUT_MS', 170000);
+  async function callGemini(apiKey, audioFiles, prompt, schema, models = geminiModels, callOptions = {}) {
+    const generationConfig = { temperature: 0 };
+    if (schema) { generationConfig.responseMimeType = 'application/json'; generationConfig.responseJsonSchema = schema; }
+    const payload = { contents: [{ parts: [{ text: prompt }, ...audioFiles.map(file => ({ inlineData: { mimeType: file.mimeType, data: file.data } }))] }], generationConfig };
+    const deadlineMs = callOptions.deadlineMs ?? geminiDeadlineMs;
+    const attemptTimeoutMs = callOptions.attemptTimeoutMs ?? geminiAttemptTimeoutMs;
+    const maxRounds = callOptions.maxRounds ?? geminiMaxRounds;
+    const deadline = Date.now() + deadlineMs;
     const incompatibleModels = new Set();
     const attempts = [];
     let lastFailure = providerError('No supported Gemini model responded.', 'provider_unavailable', true, undefined, attempts);
     let requestedRetryAfterMs = 0;
 
-    for (let round = 0; round < geminiMaxRounds; round += 1) {
-      for (const model of geminiModels) {
+    for (let round = 0; round < maxRounds; round += 1) {
+      for (const model of models) {
         if (incompatibleModels.has(model)) continue;
         const remaining = deadline - Date.now();
         if (remaining <= 0) throw providerError('Gemini call deadline exceeded.', 'provider_timeout', true, undefined, attempts);
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), Math.min(geminiAttemptTimeoutMs, remaining));
+        const timeout = setTimeout(() => controller.abort(), Math.min(attemptTimeoutMs, remaining));
         let response;
         try {
           response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(payload), signal: controller.signal });
@@ -203,11 +212,12 @@ function createProviderClient(config = {}) {
         if (response.ok) {
           const text = data.candidates?.[0]?.content?.parts?.find(part => part.text)?.text;
           if (text) {
+            if (!schema) return String(text).trim();
             try { return parseJsonText(text); }
             catch { attempts.push({ model, round: round + 1, errorCode: 'invalid_response' }); lastFailure = providerError('Gemini returned malformed structured JSON.', 'invalid_response', true, response.status, attempts); continue; }
           }
           attempts.push({ model, round: round + 1, errorCode: 'invalid_response', status: response.status });
-          lastFailure = providerError('Gemini returned no structured result.', 'invalid_response', true, response.status, attempts);
+          lastFailure = providerError(schema ? 'Gemini returned no structured result.' : 'Gemini returned no report text.', 'invalid_response', true, response.status, attempts);
           continue;
         }
 
@@ -241,7 +251,7 @@ function createProviderClient(config = {}) {
         throw providerError(`Gemini request rejected (HTTP ${response.status}).`, 'request_rejected', false, response.status, attempts.concat({ model, round: round + 1, errorCode: 'request_rejected', status: response.status }));
       }
 
-      if (round + 1 >= geminiMaxRounds || incompatibleModels.size === geminiModels.length) break;
+      if (round + 1 >= maxRounds || incompatibleModels.size === models.length) break;
       const remaining = deadline - Date.now();
       const delay = Math.min(Math.max(requestedRetryAfterMs, geminiRetryDelayMs * (round + 1)), Math.max(0, remaining - 1));
       if (delay <= 0) break;
@@ -255,7 +265,25 @@ function createProviderClient(config = {}) {
     for (const model of openaiModels) { const response = await fetchImpl('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, modalities: ['text'], response_format: { type: 'json_object' }, messages: [{ role: 'user', content }] }) }); const data = await response.json().catch(() => ({})); if (response.ok) { const text = data.choices?.[0]?.message?.content; if (text) return parseJsonText(text); lastError = 'OpenAI returned no structured result.'; continue; } const message = String(data.error?.message || 'OpenAI request failed'); console.error(`OpenAI model ${model} returned HTTP ${response.status}: ${message.replace(/\s+/g, ' ').slice(0, 300)}`); if (response.status === 401 || response.status === 403) throw providerError('OpenAI credential rejected.', 'invalid_credentials', false, response.status); if (response.status === 429) { lastError = message; continue; } if (response.status === 404 || response.status >= 500 || /not found|deprecated|not supported|model/i.test(message)) { lastError = message; continue; } throw providerError(`OpenAI request rejected (HTTP ${response.status}).`, 'request_rejected', false, response.status); }
     throw providerError(lastError, /quota|rate limit/i.test(lastError) ? 'rate_limited' : 'provider_unavailable', true);
   }
-  return { async callStructured(provider, key, files, prompt, schema) { return provider === 'gemini' ? callGemini(key, files, prompt, schema) : callOpenAI(key, files, prompt, schema); }, callGemini, callOpenAI };
+  async function callOpenAIMarkdown(apiKey, audioFiles, prompt) {
+    const content = [{ type: 'text', text: prompt }, ...audioFiles.map(file => ({ type: 'input_audio', input_audio: { data: file.data, format: /wav/i.test(`${file.mimeType} ${file.name}`) ? 'wav' : 'mp3' } }))];
+    let lastError = 'No supported OpenAI model responded.';
+    for (const model of openaiModels) {
+      const response = await fetchImpl('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, modalities: ['text'], messages: [{ role: 'user', content }] }) });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) { const text = data.choices?.[0]?.message?.content; if (text) return String(text).trim(); lastError = 'OpenAI returned no report text.'; continue; }
+      const message = String(data.error?.message || 'OpenAI request failed');
+      if (response.status === 401 || response.status === 403) throw providerError('OpenAI credential rejected.', 'invalid_credentials', false, response.status);
+      if (response.status === 429 || response.status >= 500 || response.status === 404 || /not found|deprecated|not supported|model/i.test(message)) { lastError = message; continue; }
+      throw providerError(`OpenAI request rejected (HTTP ${response.status}).`, 'request_rejected', false, response.status);
+    }
+    throw providerError(lastError, /quota|rate limit/i.test(lastError) ? 'rate_limited' : 'provider_unavailable', true);
+  }
+  return {
+    async callStructured(provider, key, files, prompt, schema, options = {}) { return provider === 'gemini' ? callGemini(key, files, prompt, schema, options.task === 'light' ? geminiLightModels : geminiModels) : callOpenAI(key, files, prompt, schema); },
+    async callMarkdown(provider, key, files, prompt) { return provider === 'gemini' ? callGemini(key, files, prompt, null, geminiQaModels.slice(0, 1), { deadlineMs: geminiQaDeadlineMs, attemptTimeoutMs: geminiQaAttemptTimeoutMs, maxRounds: 1 }) : callOpenAIMarkdown(key, files, prompt); },
+    callGemini, callOpenAI, callOpenAIMarkdown
+  };
 }
 
 function productContext(products) { return products.length ? products.map(item => `[${item.category} / ${item.subCategory}]\n${item.brief}`).join('\n\n') : 'No product was selected. Do a generic evaluation and do not assume product-specific facts.'; }
@@ -292,12 +320,73 @@ ${productContext(products)}
 LIVE RUBRIC (${rubric.name}):
 ${rubric.source}`;
 }
-function summaryPrompt(company, parameter, results) { const compact = results.map(result => ({ file: result.fileName, agent: result.agentName, score: result.finalScore, ce: result.ceDetected, deductions: result.deductionJustifications })); return `Create a concise Bangla run summary for ${company} using only these validated successful ${parameter} QA results. Identify recurring issues, compare best/worst calls, and give actionable recommendations.\n${JSON.stringify(compact)}`; }
-function singleCallSummary(result) {
+function qaMarkdownPrompt(company, rubric, products, files, evaluationDate) {
+  const recordings = files.map((file, index) => `${index + 1}. ${JSON.stringify(file.name)} — use audio attachment ${index + 1}`).join('\n');
+  const ceRules = rubric.criticalErrors.length ? rubric.criticalErrors.map(rule => `- ${rule}`).join('\n') : '- No CE rules are configured.';
+  const selectedFacts = products.length ? productContext(products) : 'No product/category was selected in the portal.';
+  return `You are a senior Call Quality Auditor for ${company}. Analyze all ${files.length} attached recordings in ONE response. Evaluate each recording independently and write the complete response in Bangla Markdown. Do not return a JSON response or a code fence. Do not create a run summary; the server creates it locally.
+
+RECORDING MAP (audio attachments are in this exact order):
+${recordings}
+
+RELIABLE REPORT BOUNDARIES:
+- Wrap every individual call report with these exact invisible Markdown comments:
+  <!-- QA_CALL_START {"fileName":"exact filename"} -->
+  <!-- QA_META {"fileName":"exact filename","agentName":"detected name or শনাক্ত করা যায়নি","finalScore":81,"maximum":${rubric.maximum},"ceDetected":false} -->
+  ...report Markdown...
+  <!-- QA_CALL_END -->
+- Use the exact filename from the recording map. The QA_META values must agree with the visible report, but the report remains useful even if a marker has a formatting mistake.
+
+CALL PURPOSE AND PARAMETER APPLICABILITY:
+- First understand why the call happened, whether the customer is already enrolled, and what the advisor was reasonably expected to do.
+- Use the live rubric as the scoring framework, not as a blind checklist. Show every rubric row in the score table, but do not deduct for an action that was genuinely outside the call's purpose.
+- For a clearly enrolled customer receiving feedback, service-check, or support, Sale/Sales/Product Pitch is not applicable unless the call contains a real upsell, cross-sell, renewal, or new-sale objective. Give non-applicable pitch rows full marks and explain why.
+- Apply the same fairness principle to any other demonstrably irrelevant row. Do not invent an exemption when the call purpose is unclear.
+
+PRODUCT FACT CHECK — MANDATORY WHEN PRODUCT CONTEXT IS SELECTED:
+- Treat the selected Sheet facts below as the authoritative source.
+- Identify every concrete product claim made in the call. For each claim, cite [MM:SS], state the advisor's claim, the matching official fact, and verdict: Correct / Incorrect / Not verifiable.
+- Missing product discussion is not automatically an error when product discussion was outside the call purpose.
+- If an advisor claim contradicts an official selected fact, explain it clearly and evaluate Wrong information / Wrong guidance CE according to the live CE rules.
+- If no product was selected, explicitly write that product-specific verification was unavailable; never pretend a Sheet fact was checked.
+
+SELECTED OFFICIAL PRODUCT FACTS:
+${selectedFacts}
+
+CRITICAL ERROR DECISION — STRICT:
+- Check every listed CE rule before finalizing the score. If any CE is evidenced, ceDetected must be true and finalScore must be 0 regardless of raw points.
+- Rudeness includes scolding, shaming, belittling, mocking, insulting, contemptuous questioning, or humiliating the customer/student even without profanity. Cite exact words and timestamps.
+- Judgmental rhetorical questions, repeatedly putting a customer/student on the spot, reprimanding them like a parent/teacher, or language that makes them feel foolish are Rudeness CE—not merely a Soft Skills deduction.
+- If your own report describes the advisor as scolding, shaming, humiliating, rude, offensive, belittling, mocking, or using কটূক্তি/খোঁটা/বকাঝকা/ধমক/অপমান, you MUST classify Rudeness CE and set the final score to 0. You may not describe that conduct and then downgrade it to an ordinary tone issue.
+- Direct but respectful guidance is not CE. Base the distinction on quoted words, delivery, context, repetition, and customer impact. Keep the visible CE explanation, score, and QA_META consistent.
+
+LIVE CE RULES:
+${ceRules}
+
+LIVE RUBRIC (${rubric.name}, maximum ${rubric.maximum}):
+${rubric.source}
+
+REQUIRED MARKDOWN SECTIONS FOR EACH CALL:
+# 📊 ${company} - QA Audit & Call Scorecard Report
+## ১. কলের সংক্ষিপ্ত তথ্য (Call Summary)
+- Include topic, customer type/need, call purpose, enrollment status, duration/tone, agent name, evaluation date (${evaluationDate}), and final score.
+## ২. প্রোডাক্ট ফ্যাক্ট-চেক ও ক্রিটিক্যাল এরর অডিট (Product Fact-Check & Critical Error Audit)
+- Include a product-claim verification table with Timestamp | Advisor claim | Official fact | Verdict, followed by CE evidence and CE Alert.
+## ৩. QA স্কোরকার্ড ও স্কোর ব্রেকডাউন (QA Scorecard Breakdown)
+| প্যারামিটার | সর্বোচ্চ নম্বর | অর্জিত নম্বর | কাটা নম্বর | টাইমস্ট্যাম্প [MM:SS] | নম্বর কাটার বিবরণ ও সংক্ষেপ |
+- Use one row for every live rubric sub-parameter. Format the first cell as **Category**<br>Parameter. Reconcile the visible totals carefully, but prioritize an evidence-grounded audit over mechanical rejection.
+## ৪. মার্ক কাটার বিস্তারিত কারণ ও বিচার বিশ্লেষণ (Deduction Justification)
+## ৫. এডভাইসরের ভালো দিকসমূহ (Strengths / Pros)
+## ৬. ভুল Approach বনাম সঠিক Approach (Script Correction)
+## ৭. অ্যাকশনেবল পরামর্শ ও ফাইনাল পারফরম্যান্স রেটিং (Actionable Coaching & Final Rating)
+- Every deduction, strength, correction, and recommendation must cite a precise [MM:SS] timestamp.
+- Suggestions must respond to observed moments in the audio, not generic advice.`;
+}
+function markdownRunSummary(results) {
   return {
-    recurringIssues: result.deductionJustifications,
-    bestAndWorstCalls: `${result.fileName}: ${result.finalScore}/${result.maximum}${result.ceDetected ? ' (CE)' : ' (Non-CE)'}`,
-    overallRecommendations: result.actionableTips
+    recurringIssues: results.flatMap(result => result.deductionJustifications).slice(0, 12),
+    bestAndWorstCalls: results.length === 1 ? `${results[0].fileName}: ${results[0].finalScore}/${results[0].maximum}${results[0].ceDetected ? ' (CE)' : ' (Non-CE)'}` : 'সফল কলগুলোর স্কোর ও প্রমাণভিত্তিক ফলাফল সার্ভারে তুলনা করা হয়েছে।',
+    overallRecommendations: results.flatMap(result => result.actionableTips).slice(0, 12)
   };
 }
 function voicePrompt(company, products, count) { return `Analyze ${count} calls for ${company} as a Customer Insights analyst. Return one Bangla summary grounded only in the recordings. Include precise timestamps where useful. This is not a QA scorecard and must not score calls.\n\nPRODUCT CONTEXT:\n${productContext(products)}`; }
@@ -328,21 +417,39 @@ function createApp(options = {}) {
       const products = await sheetStore.getProductBriefs(categories, selections); if ((categories.length || selections.length) && !products.length) return res.status(400).json({ error: 'The selected product briefs were not found.' });
       let parameter = ''; let rubric = null;
       if (mode !== 'voice') { parameter = String(req.body?.parameter || '').trim(); if (!parameter) return res.status(400).json({ error: 'Choose a QA parameter.' }); const entry = await sheetStore.getQaParameter(parameter); if (!entry) return res.status(400).json({ error: 'The selected QA parameter is no longer available.' }); rubric = pipeline.parseQaRubric(entry.name, entry.detail); parameter = entry.name; sessions.setParameter(req.sessionToken, parameter); }
-      const templateKeys = mode === 'single' ? ['qaCall', 'qaSummary'] : [mode]; const templates = pipeline.loadAndValidateTemplates(templateDir, templateKeys); const timestamp = new Date().toISOString(); const evaluationDate = timestamp.slice(0, 10); let responseBody;
+      const templateKeys = mode === 'single' ? ['qaSummary'] : [mode]; const templates = pipeline.loadAndValidateTemplates(templateDir, templateKeys); const timestamp = new Date().toISOString(); const evaluationDate = timestamp.slice(0, 10); let responseBody;
       if (mode === 'single') {
-        const items = []; const results = []; const successfulNames = [];
+        const prompt = qaMarkdownPrompt(user.companyName, rubric, products, audioFiles, evaluationDate);
+        const cacheKey = analysisCacheKey(user, provider, `qa-markdown\n${user.companyName}\n${parameter}\n${rubric.source}\n${productContext(products)}\n${templates.qaSummary}`, audioFiles);
+        const cached = analysisCache.get(cacheKey);
+        if (cached) return res.json({ ...cached, cached: true, auditResultWrite: { status: 'cached', savedRows: 0 } });
+        const reportMarkdown = await providerClient.callMarkdown(provider, apiKey, audioFiles, prompt);
+        const parsedCalls = pipeline.parseQaMarkdownReport(reportMarkdown, audioFiles.map(file => file.name), rubric);
+        const remainingCalls = [...parsedCalls];
+        const items = [];
+        const results = [];
         for (const file of audioFiles) {
-          try { const structured = await providerClient.callStructured(provider, apiKey, [file], qaPrompt(user.companyName, rubric, products, file.name), pipeline.qaSchema(rubric)); const result = pipeline.validateQaResult(structured, rubric); const markdown = pipeline.renderQaCall(templates.qaCall, result, user.companyName, evaluationDate); result.fileName = file.name; results.push(result); successfulNames.push(file.name); items.push({ kind: 'call', fileName: file.name, status: 'success', markdown, score: result.finalScore, maximum: result.maximum, ce: result.ceDetected }); }
-          catch (error) { const failure = safeProviderFailure(error); console.error(`Call analysis failed for ${file.name}:`, error.message); items.push({ kind: 'call', fileName: file.name, status: 'failed', error: `${failure.error} No Sheet row was created.`, errorCode: failure.errorCode, retryable: failure.retryable }); }
+          let index = remainingCalls.findIndex(result => result.fileName === file.name);
+          if (index < 0 && remainingCalls.length === audioFiles.length - results.length) index = 0;
+          if (index < 0) { items.push({ kind: 'call', fileName: file.name, status: 'failed', error: 'The combined Markdown response did not contain a separate report for this call. No Sheet row was created.', errorCode: 'report_parse', retryable: true }); continue; }
+          const result = remainingCalls.splice(index, 1)[0]; result.fileName = file.name;
+          if (products.length && !result.productCheckPresent) result.markdown = `> ⚠️ নির্বাচিত প্রোডাক্ট তথ্য দেওয়া হয়েছিল, কিন্তু AI রিপোর্টে claim-by-claim product verification পাওয়া যায়নি।\n\n${result.markdown}`;
+          results.push(result);
+          items.push({ kind: 'call', fileName: file.name, status: 'success', markdown: result.markdown, score: Number.isFinite(result.finalScore) ? result.finalScore : '—', maximum: result.maximum, ce: result.ceDetected });
         }
-        if (!results.length) { const failureItem = items.find(item => item.status === 'failed') || {}; return res.status(502).json({ error: failureItem.error || 'None of the uploaded calls could be evaluated.', errorCode: failureItem.errorCode || 'provider_failed', retryable: failureItem.retryable === true, items, partial: true, auditResultWrite: { status: 'not_saved', savedRows: 0 } }); }
-        try { const summary = results.length === 1 ? singleCallSummary(results[0]) : pipeline.validateSummaryResult(await providerClient.callStructured(provider, apiKey, [], summaryPrompt(user.companyName, parameter, results), pipeline.SUMMARY_SCHEMA)); items.push({ kind: 'summary', status: 'success', markdown: pipeline.renderQaSummary(templates.qaSummary, summary, results, successfulNames, user.companyName, parameter, evaluationDate) }); }
-        catch (error) { console.error('QA run summary failed:', error.message); items.push({ kind: 'summary', status: 'failed', error: 'The run summary could not be generated.' }); }
-        let auditResultWrite = { status: 'saved', savedRows: results.length }; try { await sheetStore.appendAuditResults(results.map(result => pipeline.auditResultRow(result, parameter, timestamp))); } catch (error) { console.error('Audit result storage failed:', error.message); auditResultWrite = { status: 'failed', savedRows: 0, message: 'Reports were generated, but the audit results were not saved to Google Sheets.' }; }
+        const storableResults = results.filter(result => result.storageEligible);
+        if (storableResults.length) {
+          try { const summary = markdownRunSummary(storableResults); items.push({ kind: 'summary', status: 'success', markdown: pipeline.renderQaSummary(templates.qaSummary, summary, storableResults, storableResults.map(result => result.fileName), user.companyName, parameter, evaluationDate) }); }
+          catch (error) { console.error('Local QA run summary failed:', error.message); items.push({ kind: 'summary', status: 'failed', error: 'The local run summary could not be generated.', errorCode: 'summary_render', retryable: false }); }
+        }
+        let auditResultWrite = { status: 'saved', savedRows: storableResults.length };
+        if (storableResults.length !== results.length) auditResultWrite = { status: 'failed', savedRows: 0, message: 'The Markdown reports were generated, but one or more scores could not be read, so no audit rows were saved.' };
+        else { try { await sheetStore.appendAuditResults(storableResults.map(result => pipeline.auditResultRowFromMarkdown(result, parameter, timestamp))); } catch (error) { console.error('Audit result storage failed:', error.message); auditResultWrite = { status: 'failed', savedRows: 0, message: 'Reports were generated, but the audit results were not saved to Google Sheets.' }; } }
         responseBody = { mode, items, report: items.filter(item => item.markdown).map(item => item.markdown).join('\n\n---\n\n'), partial: items.some(item => item.status === 'failed') || auditResultWrite.status === 'failed', auditResultWrite, cached: false };
+        if (!responseBody.partial) analysisCache.set(cacheKey, responseBody);
       } else {
         const prompt = mode === 'voice' ? voicePrompt(user.companyName, products, audioFiles.length) : coachingPrompt(user.companyName, rubric, products, audioFiles.length); const schema = mode === 'voice' ? pipeline.VOICE_SCHEMA : pipeline.COACHING_SCHEMA; const template = templates[mode]; const cacheKey = analysisCacheKey(user, provider, `${prompt}\n${template}`, audioFiles); const cached = analysisCache.get(cacheKey); if (cached) return res.json({ ...cached, cached: true });
-        const structured = await providerClient.callStructured(provider, apiKey, audioFiles, prompt, schema); const markdown = mode === 'voice' ? pipeline.renderVoice(template, pipeline.validateVoiceResult(structured), audioFiles.length) : pipeline.renderCoaching(template, pipeline.validateCoachingResult(structured), user.companyName); responseBody = { mode, items: [{ kind: mode, status: 'success', markdown }], report: markdown, partial: false, auditResultWrite: { status: 'not_applicable', savedRows: 0 }, cached: false }; analysisCache.set(cacheKey, responseBody);
+        const structured = await providerClient.callStructured(provider, apiKey, audioFiles, prompt, schema, { task: 'light' }); const markdown = mode === 'voice' ? pipeline.renderVoice(template, pipeline.validateVoiceResult(structured), audioFiles.length) : pipeline.renderCoaching(template, pipeline.validateCoachingResult(structured), user.companyName); responseBody = { mode, items: [{ kind: mode, status: 'success', markdown }], report: markdown, partial: false, auditResultWrite: { status: 'not_applicable', savedRows: 0 }, cached: false }; analysisCache.set(cacheKey, responseBody);
       }
       const previous = usageLocks.get(user.email) || Promise.resolve(); const next = previous.catch(() => {}).then(() => sheetStore.incrementUsage(user.email)); usageLocks.set(user.email, next); await next.catch(error => console.error('Usage update failed:', error.message)); if (usageLocks.get(user.email) === next) usageLocks.delete(user.email); return res.json(responseBody);
     } catch (error) { console.error('Analysis failed:', error.message); if (/rubric|template|placeholder/i.test(error.message)) return res.status(503).json({ error: error.message, errorCode: 'configuration_error', retryable: false }); return res.status(502).json(safeProviderFailure(error)); }
@@ -354,4 +461,4 @@ function createApp(options = {}) {
 }
 
 if (require.main === module) { require('dotenv').config(); const port = envNumber('PORT', 3000); createApp().listen(port, () => console.log(`QA Auditor listening on port ${port}`)); }
-module.exports = { createApp, createGoogleSheetStore, createProviderClient, createSessionManager, createAnalysisCache, rowsToUsers, rowsToProductBriefs, groupProductOptions, normalizeEmail, qaPrompt, parseQaRubric: pipeline.parseQaRubric };
+module.exports = { createApp, createGoogleSheetStore, createProviderClient, createSessionManager, createAnalysisCache, rowsToUsers, rowsToProductBriefs, groupProductOptions, normalizeEmail, qaPrompt, qaMarkdownPrompt, parseQaRubric: pipeline.parseQaRubric };

@@ -4,8 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const request = require('supertest');
-const { createApp, createProviderClient, rowsToUsers, rowsToProductBriefs, parseQaRubric, qaPrompt } = require('../server');
-const { loadTemplate, loadAndValidateTemplates, renderTemplate, validateQaResult, renderQaCall, qaSchema } = require('../lib/audit-pipeline');
+const { createApp, createProviderClient, rowsToUsers, rowsToProductBriefs, parseQaRubric, qaPrompt, qaMarkdownPrompt } = require('../server');
+const { loadTemplate, loadAndValidateTemplates, renderTemplate, validateQaResult, renderQaCall, parseQaMarkdownReport, qaSchema } = require('../lib/audit-pipeline');
 
 const RUBRIC = `১. Greetings (৫ নম্বর)\n- Greetings (২)\n- Permission (৩)\n\n২. Closing (৫ নম্বর)\n- Summary (২)\n- Goodbye (৩)\n\nCritical Errors\n- Wrong information\n- Rudeness`;
 
@@ -40,11 +40,54 @@ function qaResult(overrides = {}) {
   };
 }
 
+function qaMarkdownResult(files) {
+  return files.map(file => `<!-- QA_CALL_START {"fileName":${JSON.stringify(file.name)}} -->
+<!-- QA_META {"fileName":${JSON.stringify(file.name)},"agentName":"Agent One","finalScore":9,"maximum":10,"ceDetected":false} -->
+# 📊 Robi - QA Audit & Call Scorecard Report
+
+## ১. কলের সংক্ষিপ্ত তথ্য (Call Summary)
+- **এজেন্টের নাম:** Agent One
+- **চূড়ান্ত স্কোর:** **9 / 10**
+
+## ২. প্রোডাক্ট ফ্যাক্ট-চেক ও ক্রিটিক্যাল এরর অডিট (Product Fact-Check & Critical Error Audit)
+| Timestamp | Advisor claim | Official fact | Verdict |
+| :--- | :--- | :--- | :--- |
+| [00:10] | একটি তথ্য | Official PCMB facts | Correct |
+- **CE Alert:** Non-CE
+
+## ৩. QA স্কোরকার্ড ও স্কোর ব্রেকডাউন (QA Scorecard Breakdown)
+| প্যারামিটার | সর্বোচ্চ নম্বর | অর্জিত নম্বর | কাটা নম্বর | টাইমস্ট্যাম্প [MM:SS] | নম্বর কাটার বিবরণ ও সংক্ষেপ |
+| :--- | ---: | ---: | ---: | :---: | :--- |
+| **Greetings**<br>Greetings | 2 | 2 | 0 | [00:01] | — |
+| **Greetings**<br>Permission | 3 | 2 | 1 | [00:03] | এক নম্বর কাটা |
+| **Closing**<br>Summary | 2 | 2 | 0 | [00:50] | — |
+| **Closing**<br>Goodbye | 3 | 3 | 0 | [00:55] | — |
+| **সর্বমোট নম্বর (Total Score)** | **10** | **9** | **1** | **—** | **Non-CE** |
+
+## ৪. মার্ক কাটার বিস্তারিত কারণ ও বিচার বিশ্লেষণ (Deduction Justification)
+- [00:03] Permission উন্নত করুন।
+
+## ৫. এডভাইসরের ভালো দিকসমূহ (Strengths / Pros)
+- [00:01] ভালো সম্ভাষণ।
+
+## ৬. ভুল Approach বনাম সঠিক Approach (Script Correction)
+| [00:03] | দুর্বল কথা | সঠিক কথা |
+
+## ৭. অ্যাকশনেবল পরামর্শ ও ফাইনাল পারফরম্যান্স রেটিং (Actionable Coaching & Final Rating)
+- [00:03] প্রোবিং করুন।
+<!-- QA_CALL_END -->`).join('\n\n');
+}
+
 function fakeProviders(options = {}) {
   return {
     calls: [],
+    async callMarkdown(provider, key, files, prompt) {
+      this.calls.push({ kind: 'markdown', provider, key, files, prompt });
+      if (options.error) throw options.error;
+      return options.markdown || qaMarkdownResult(files.filter(file => file.name !== options.failFile));
+    },
     async callStructured(provider, key, files, prompt, schema) {
-      this.calls.push({ provider, key, files, prompt, schema });
+      this.calls.push({ kind: 'structured', provider, key, files, prompt, schema });
       if (options.failFile && files[0]?.name === options.failFile) throw new Error('provider failed');
       if (schema.properties?.scores) return qaResult(options.qaOverrides || {});
       if (schema.properties?.recurring_issues) return { recurring_issues: ['একটি সমস্যা'], best_and_worst_calls: 'তুলনা', overall_recommendations: ['কোচিং দিন'] };
@@ -120,6 +163,54 @@ test('requires precise call times for QA evidence and coaching suggestions', () 
   assert.throws(() => validateQaResult(qaResult({ actionable_tips: [{ timestamp: '', detail: 'প্রোবিং করুন' }] }), rubric), /timestamp/);
 });
 
+test('permissively parses Markdown call markers, scores, sections, and CE metadata', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const parsed = parseQaMarkdownReport(qaMarkdownResult([{ name: 'call.wav' }]), ['call.wav'], rubric);
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].fileName, 'call.wav');
+  assert.equal(parsed[0].finalScore, 9);
+  assert.equal(parsed[0].maximum, 10);
+  assert.equal(parsed[0].ceDetected, false);
+  assert.equal(parsed[0].scores.length, 4);
+  assert.equal(parsed[0].scores[1].parameter, 'Permission');
+  assert.match(parsed[0].productFactCheck, /Official PCMB facts/);
+  assert.match(parsed[0].actionableTips[0], /প্রোবিং/);
+  assert.equal(parsed[0].storageEligible, true);
+});
+
+test('visible CE evidence overrides inconsistent non-CE marker metadata', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const source = qaMarkdownResult([{ name: 'call.wav' }]).replace('## ৩.', '- **CE Alert:** 🚨 Critical Error Detected\n\n## ৩.');
+  const parsed = parseQaMarkdownReport(source, ['call.wav'], rubric)[0];
+  assert.equal(parsed.ceDetected, true);
+  assert.equal(parsed.finalScore, 0);
+});
+
+test('keeps a usable Markdown audit even when the model omits the hidden markers', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const source = qaMarkdownResult([{ name: 'call.wav' }])
+    .replace(/<!-- QA_CALL_START[\s\S]*?-->/, '')
+    .replace(/<!-- QA_META[\s\S]*?-->/, '')
+    .replace('<!-- QA_CALL_END -->', '');
+  const parsed = parseQaMarkdownReport(source, ['call.wav'], rubric)[0];
+  assert.equal(parsed.fileName, 'call.wav');
+  assert.equal(parsed.finalScore, 9);
+  assert.equal(parsed.storageEligible, true);
+});
+
+test('Markdown QA prompt uses one run, preserves score sections, checks products, and treats the rubric contextually', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const prompt = qaMarkdownPrompt('Robi', rubric, [{ category: 'HSC', subCategory: 'Science', brief: 'Official facts' }], [{ name: 'call.wav' }], '2026-08-25');
+  assert.match(prompt, /Analyze all 1 attached recordings in ONE response/);
+  assert.match(prompt, /Do not return a JSON response or a code fence/);
+  assert.match(prompt, /QA_META/);
+  assert.match(prompt, /Use the live rubric as the scoring framework, not as a blind checklist/);
+  assert.match(prompt, /you MUST classify Rudeness CE/);
+  assert.match(prompt, /Identify every concrete product claim/);
+  assert.match(prompt, /Official facts/);
+  assert.match(prompt, /QA স্কোরকার্ড ও স্কোর ব্রেকডাউন/);
+});
+
 test('constrains every Gemini score position to the exact live rubric row and weight', () => {
   const rubric = parseQaRubric('Outbound', RUBRIC);
   const schema = qaSchema(rubric).properties.scores;
@@ -176,6 +267,38 @@ test('sends full JSON Schema through Gemini responseJsonSchema, not the legacy O
   assert.deepEqual(requestBody.generationConfig.responseJsonSchema, schema);
   assert.equal(requestBody.generationConfig.temperature, 0);
   assert.equal('responseSchema' in requestBody.generationConfig, false);
+});
+
+test('plain Markdown Gemini calls omit the structured-output schema', async () => {
+  let requestBody;
+  const client = createProviderClient({
+    geminiQaModels: ['gemini-test'], geminiMaxRounds: 1,
+    fetchImpl: async (_url, options) => { requestBody = JSON.parse(options.body); return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '# Audit report' }] } }] }; } }; }
+  });
+  assert.equal(await client.callMarkdown('gemini', 'test-key', [], 'Return Markdown.'), '# Audit report');
+  assert.equal(requestBody.generationConfig.temperature, 0);
+  assert.equal('responseMimeType' in requestBody.generationConfig, false);
+  assert.equal('responseJsonSchema' in requestBody.generationConfig, false);
+});
+
+test('QA Markdown makes one Gemini request without fallback or retry amplification', async () => {
+  let requests = 0;
+  const client = createProviderClient({
+    geminiQaModels: ['gemini-3.6-flash', 'gemini-3.5-flash-lite'], geminiMaxRounds: 3,
+    fetchImpl: async () => { requests += 1; return { ok: false, status: 429, headers: { get: () => '0' }, async json() { return { error: { message: 'Quota exceeded' } }; } }; }
+  });
+  await assert.rejects(client.callMarkdown('gemini', 'test-key', [], 'Return Markdown.'), error => error.errorCode === 'rate_limited');
+  assert.equal(requests, 1);
+});
+
+test('summary-only structured tasks route to Flash-Lite before the heavy model', async () => {
+  const requestedModels = [];
+  const client = createProviderClient({
+    geminiModels: ['heavy-model'], geminiLightModels: ['light-model', 'heavy-model'], geminiMaxRounds: 1,
+    fetchImpl: async url => { requestedModels.push(url); return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } }; }
+  });
+  await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object' }, { task: 'light' });
+  assert.match(requestedModels[0], /light-model/);
 });
 
 test('makes the live CE rules and rudeness zero-score override explicit', () => {
@@ -314,8 +437,21 @@ test('one-call QA uses one AI request while still returning the call and summary
   assert.equal(store.writes.length, 1);
 });
 
+test('keeps the audit but flags a missing product verification section', async () => {
+  const markdown = qaMarkdownResult([{ name: 'call.wav' }])
+    .replace(/Advisor claim/g, 'Claim')
+    .replace(/Official fact/g, 'Reference')
+    .replace(/Verdict/g, 'Result');
+  const app = createApp({ sheetStore: fakeStore(), providerClient: fakeProviders({ markdown }) });
+  const agent = request.agent(app); await login(agent);
+  const response = await agent.post('/api/analyze').send(payload({ productSelections: [{ category: 'HSC 28', subCategory: 'PCMB' }] }));
+  assert.equal(response.status, 200);
+  assert.match(response.body.items[0].markdown, /claim-by-claim product verification/);
+  assert.equal(response.body.items[0].status, 'success');
+});
+
 test('provider failures expose a safe machine-readable reason and retry flag', async () => {
-  const providerClient = { async callStructured() { const error = new Error('secret upstream detail'); error.errorCode = 'rate_limited'; error.retryable = true; error.providerStatus = 429; throw error; } };
+  const providerClient = { async callMarkdown() { const error = new Error('secret upstream detail'); error.errorCode = 'rate_limited'; error.retryable = true; error.providerStatus = 429; throw error; } };
   const app = createApp({ sheetStore: fakeStore(), providerClient }); const agent = request.agent(app); await login(agent);
   const response = await agent.post('/api/analyze').send(payload());
   assert.equal(response.status, 502);
@@ -324,11 +460,11 @@ test('provider failures expose a safe machine-readable reason and retry flag', a
   assert.doesNotMatch(JSON.stringify(response.body), /secret upstream detail/);
 });
 
-test('QA analyzes each file, renders ordered items, appends exact A:K rows, and never caches re-audits', async () => {
+test('QA uses one Markdown request for the run, appends A:K rows, and caches identical runs for six hours', async () => {
   const store = fakeStore(); const providers = fakeProviders(); const app = createApp({ sheetStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
   const audioFiles = ['a.wav', 'b.wav'].map(name => ({ name, mimeType: 'audio/wav', data: Buffer.from(name).toString('base64') }));
   const first = await agent.post('/api/analyze').send(payload({ audioFiles })); assert.equal(first.status, 200); assert.deepEqual(first.body.items.map(item => item.kind), ['call', 'call', 'summary']); assert.match(first.body.report, /Robi - QA Audit/); assert.equal(store.writes.length, 2); assert.equal(store.writes[0].length, 11); assert.equal(store.writes[0][2], 'Outbound'); assert.equal(store.writes[0][3], 9); assert.equal(store.users[0].usage, 1);
-  const second = await agent.post('/api/analyze').send(payload({ audioFiles })); assert.equal(second.body.cached, false); assert.equal(store.writes.length, 4); assert.equal(providers.calls.length, 6); assert.equal(store.users[0].usage, 2);
+  const second = await agent.post('/api/analyze').send(payload({ audioFiles })); assert.equal(second.body.cached, true); assert.equal(second.body.auditResultWrite.status, 'cached'); assert.equal(store.writes.length, 2); assert.equal(providers.calls.length, 1); assert.equal(store.users[0].usage, 1);
 });
 
 test('partial QA keeps and stores successful calls only', async () => {

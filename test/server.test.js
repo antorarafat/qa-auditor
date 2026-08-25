@@ -27,7 +27,8 @@ function fakeStore(options = {}) {
 function qaResult(overrides = {}) {
   return {
     agent_name: 'Agent One', call_summary: 'কল সারাংশ', client_type_and_need: 'শিক্ষার্থী', call_duration_and_tone: '১ মিনিট, পেশাদার',
-    product_fact_check: 'সঠিক', ce_detected: false, ce_audit_details: 'CE নেই', ce_alert: 'Non-CE',
+    product_fact_check: 'সঠিক', customer_enrollment_status: 'prospect', call_objective: 'sales', sales_pitch_applicable: true,
+    sales_pitch_applicability_evidence: { timestamp: '[00:02]', detail: 'কাস্টমার কোর্স কেনার বিষয়ে জানতে চেয়েছেন।' }, ce_detected: false, ce_audit_details: 'CE নেই', ce_alert: 'Non-CE',
     scores: [
       { category: 'Greetings', parameter: 'Greetings', maximum: 2, achieved: 2, timestamp: '[00:01]', deduction_reason: '—' },
       { category: 'Greetings', parameter: 'Permission', maximum: 3, achieved: 2, timestamp: '[00:03]', deduction_reason: 'এক নম্বর কাটা' },
@@ -72,6 +73,33 @@ test('reconciles raw points and zeros only the CE final score', () => {
   const result = validateQaResult(qaResult({ ce_detected: true }), rubric);
   assert.equal(result.achievedScore, 9); assert.equal(result.deductedScore, 1); assert.equal(result.finalScore, 0);
   assert.throws(() => validateQaResult(qaResult({ scores: qaResult().scores.slice(1) }), rubric), /required/);
+});
+
+test('does not deduct sale-pitch marks for an enrolled customer service-check call', () => {
+  const rubric = parseQaRubric('Outbound', `১. Product Pitch (৫ নম্বর)\n- Features (৫)\n\n২. Closing (৫ নম্বর)\n- Goodbye (৫)`);
+  const result = validateQaResult(qaResult({
+    customer_enrollment_status: 'enrolled', call_objective: 'service_check', sales_pitch_applicable: false,
+    sales_pitch_applicability_evidence: { timestamp: '[00:20]', detail: 'কাস্টমার ইতোমধ্যে কোর্সে এনরোল্ড এবং সেবা ঠিকমতো পাচ্ছেন কিনা যাচাই করা হচ্ছে।' },
+    scores: [
+      { category: 'Product Pitch', parameter: 'Features', maximum: 5, achieved: 0, timestamp: '—', deduction_reason: 'পিচ করা হয়নি' },
+      { category: 'Closing', parameter: 'Goodbye', maximum: 5, achieved: 5, timestamp: '[01:00]', deduction_reason: '—' }
+    ]
+  }), rubric);
+  assert.equal(result.scores[0].achieved, 5);
+  assert.equal(result.scores[0].deducted, 0);
+  assert.equal(result.finalScore, 10);
+  assert.match(result.scores[0].deductionReason, /প্রযোজ্য নয়/);
+  assert.equal(result.salesPitchApplicable, false);
+});
+
+test('still evaluates sale pitch for a prospect or a genuine sales objective', () => {
+  const rubric = parseQaRubric('Outbound', `১. Product Pitch (৫ নম্বর)\n- Features (৫)`);
+  const result = validateQaResult(qaResult({
+    scores: [{ category: 'Product Pitch', parameter: 'Features', maximum: 5, achieved: 0, timestamp: '[00:20]', deduction_reason: 'পিচ করা হয়নি' }]
+  }), rubric);
+  assert.equal(result.scores[0].achieved, 0);
+  assert.equal(result.finalScore, 0);
+  assert.equal(result.salesPitchApplicable, true);
 });
 
 test('accepts empty optional QA narratives and derives safe report content from scores', () => {
@@ -157,6 +185,8 @@ test('makes the live CE rules and rudeness zero-score override explicit', () => 
   assert.match(prompt, /direct scolding, shaming, belittling/);
   assert.match(prompt, /Never describe a listed CE in the evidence while returning ce_detected false/);
   assert.match(prompt, /- Rudeness/);
+  assert.match(prompt, /already enrolled AND the primary purpose is feedback collection, service checking, or support/);
+  assert.match(prompt, /award its full maximum score/);
 });
 
 test('uses full Gemini Flash before Flash Lite when the primary model is unavailable', async () => {

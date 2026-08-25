@@ -149,6 +149,13 @@ TIMESTAMPED EVIDENCE AND COACHING — MANDATORY:
 - Tie every suggestion to the exact moment that motivated it. Never return generic, untimestamped coaching advice.
 - Use a timestamp range such as [01:30-01:50] when the behavior spans a conversation segment.
 
+SALE-PITCH APPLICABILITY — SCORE BEFORE JUDGING THE PITCH:
+- First determine customer_enrollment_status and the primary call_objective from the recording, with timestamped evidence.
+- Set sales_pitch_applicable to false only when the audio clearly establishes that the customer is already enrolled AND the primary purpose is feedback collection, service checking, or support—not a new sale, upsell, cross-sell, or renewal.
+- When sales_pitch_applicable is false, every Sale Pitch, Sales Pitch, or Product Pitch rubric row is not applicable: award its full maximum score and do not list the missing pitch as a deduction or coaching gap.
+- Being enrolled alone is not enough for exemption. If the call includes a genuine upsell, cross-sell, renewal, or other sales objective, sales_pitch_applicable remains true and the pitch is evaluated normally.
+- If enrollment status or call purpose is unclear, sales_pitch_applicable remains true. Never assume an exemption without clear audio evidence.
+
 CRITICAL ERROR DECISION — STRICT ZERO-SCORE OVERRIDE:
 - Complete the CE decision before assigning the final score.
 - Evaluate every listed CE rule against the audio. If any listed rule is evidenced, ce_detected MUST be true. The server will then set the final score to zero regardless of raw achieved points.

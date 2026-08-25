@@ -12,10 +12,6 @@ services:
       GEMINI_MODELS: gemini-3.6-flash
       AI_CACHE_TTL_MS: 21600000
       AI_CACHE_MAX_ENTRIES: 100
-      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google_service_account
-      GOOGLE_SHEETS_COMPANY_TAB: company
-    secrets:
-      - google_service_account
     read_only: true
     tmpfs:
       - /tmp
@@ -28,7 +24,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-
-secrets:
-  google_service_account:
-    file: ./arafat-alahe-403508-11c3d59ec795.json

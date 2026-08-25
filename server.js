@@ -12,8 +12,6 @@ const INDEX_PATH = path.join(ROOT, '10ms-qa-audit-portal.html');
 const DIST_DIR = path.join(ROOT, 'dist');
 const DIST_INDEX_PATH = path.join(DIST_DIR, 'index.html');
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-const DEFAULT_MAX_AUDIO_FILES = 5;
-const DEFAULT_MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash'];
 const DEFAULT_OPENAI_MODELS = ['gpt-4o-audio-preview', 'gpt-4o-mini-audio-preview'];
 const DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -86,10 +84,40 @@ function rowsToUsers(values) {
   })).filter(user => user.email);
 }
 
+function rowsToProductBriefs(values) {
+  if (!Array.isArray(values) || values.length < 1) return [];
+  const headers = values[0].map(normalizeHeader);
+  const categoryIndex = headers.indexOf('category');
+  const subCategoryIndex = headers.indexOf('sub-category') >= 0
+    ? headers.indexOf('sub-category')
+    : headers.indexOf('sub_category');
+  const briefIndex = headers.indexOf('brief');
+  if (categoryIndex < 0 || subCategoryIndex < 0 || briefIndex < 0) {
+    throw new Error('The product brief sheet must contain Category, Sub-Category and Brief columns.');
+  }
+  return values.slice(1).map(row => ({
+    category: String(row[categoryIndex] || '').trim(),
+    subCategory: String(row[subCategoryIndex] || '').trim(),
+    brief: String(row[briefIndex] || '').trim()
+  })).filter(item => item.category && item.subCategory && item.brief);
+}
+
+function groupProductOptions(products) {
+  const grouped = new Map();
+  for (const product of products) {
+    if (!grouped.has(product.category)) grouped.set(product.category, []);
+    const options = grouped.get(product.category);
+    if (!options.includes(product.subCategory)) options.push(product.subCategory);
+  }
+  return Array.from(grouped, ([category, subCategories]) => ({ category, subCategories }));
+}
+
 function createGoogleSheetStore(config = {}) {
   const spreadsheetId = config.spreadsheetId || process.env.GOOGLE_SHEETS_ID;
   const sheetName = config.sheetName || process.env.GOOGLE_SHEETS_TAB || 'user';
   const companySheetName = config.companySheetName || process.env.GOOGLE_SHEETS_COMPANY_TAB || 'company';
+  const productSheetName = config.productSheetName || process.env.GOOGLE_SHEETS_PRODUCT_TAB || 'product_brief';
+  const scorecardSheetName = config.scorecardSheetName || process.env.GOOGLE_SHEETS_SCORECARD_TAB || 'qa_scorecard';
   let sheetsClient;
 
   function getClient() {
@@ -143,6 +171,27 @@ function createGoogleSheetStore(config = {}) {
     }
   }
 
+  async function readProductBriefs() {
+    assertConfigured();
+    const response = await getClient().spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${productSheetName.replace(/'/g, "''")}'!A1:C1000`,
+      valueRenderOption: 'FORMATTED_VALUE'
+    });
+    return rowsToProductBriefs(response.data.values || []);
+  }
+
+  async function readQaScorecard() {
+    assertConfigured();
+    const response = await getClient().spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${scorecardSheetName.replace(/'/g, "''")}'!A1:A1000`,
+      valueRenderOption: 'FORMATTED_VALUE'
+    });
+    const values = response.data.values || [];
+    return String(values.slice(1).find(row => String(row[0] || '').trim())?.[0] || '').trim();
+  }
+
   return {
     async findByEmail(email) {
       const normalized = normalizeEmail(email);
@@ -150,6 +199,25 @@ function createGoogleSheetStore(config = {}) {
       const user = users.find(item => item.email === normalized) || null;
       if (user && companyName) user.companyName = companyName;
       return user;
+    },
+    async getAuditConfiguration() {
+      const [products, scorecard] = await Promise.all([readProductBriefs(), readQaScorecard()]);
+      return { products: groupProductOptions(products), scorecard };
+    },
+    async getProductBriefs(categories = [], productSelections = []) {
+      const products = await readProductBriefs();
+      if (productSelections.length) {
+        const selected = new Set(productSelections.map(item => `${item.category}\0${item.subCategory}`));
+        return products.filter(item => selected.has(`${item.category}\0${item.subCategory}`));
+      }
+      if (categories.length) {
+        const selectedCategories = new Set(categories);
+        return products.filter(item => selectedCategories.has(item.category));
+      }
+      return [];
+    },
+    async getQaScorecard() {
+      return readQaScorecard();
     },
     async incrementUsage(email) {
       assertConfigured();
@@ -166,6 +234,16 @@ function createGoogleSheetStore(config = {}) {
       return true;
     }
   };
+}
+
+function buildPromptText(mode, productBrief, scorecard, audioCount) {
+  const productContext = productBrief
+    ? `\n\nOFFICIAL PRODUCT BRIEF / FACT SHEET:\n"""\n${productBrief}\n"""`
+    : '\n\nNo product category or sub-category was selected. Perform a generic QA evaluation and do not assume product-specific facts.';
+  const common = `${productContext}\n\nEVALUATION QA SCORECARD:\n"""\n${scorecard}\n"""\n\nAnalyze the audio carefully and write the complete report in BANGLA (বাংলা). Include precise [MM:SS] timestamps for every observation. If Wrong info, Rudeness, False promise, Wrong guidance or Broken callback is found, set the final score to 0/100.`;
+  if (mode === 'voice') return `Act as a Customer Insights & Operations Analyst for 10 Minute School. Analyze ${audioCount} call recording(s) and produce a Bangla Customer Voice, Objections & Barriers Report.${common}\nInclude customer persona, questions, purchase barriers, product feedback, objection handling and actionable sales recommendations.`;
+  if (mode === 'coaching') return `Act as a Senior Sales Communication Coach for 10 Minute School. Analyze ${audioCount} call recording(s) and produce a Bangla Advisor Development Plan.${common}\nInclude sales pitch, tone, confidence, listening/probing, corrected scripts and a weekly growth plan.`;
+  return `Act as a world-class QA Manager and Call Evaluator for 10 Minute School. Analyze ${audioCount} call recording(s) and produce an exhaustive Bangla Call Quality Audit & Scorecard Report.${common}\nInclude call summary, fact-check and critical-error audit, a parameter-by-parameter score table, deduction justification, strengths, script corrections and final rating.`;
 }
 
 function publicUser(user) {
@@ -267,34 +345,32 @@ function createSessionManager() {
   };
 }
 
-function setSessionCookie(res, token) {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+function setSessionCookie(res, token, secureCookies) {
+  const secure = secureCookies ? '; Secure' : '';
   res.setHeader('Set-Cookie', `qa_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${secure}`);
 }
 
-function clearSessionCookie(res) {
-  res.setHeader('Set-Cookie', 'qa_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
+function clearSessionCookie(res, secureCookies) {
+  const secure = secureCookies ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `qa_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`);
 }
 
-function isSameOrigin(req) {
+function isSameOrigin(req, allowedOrigins) {
   const origin = req.get('origin');
   if (!origin) return true;
-  const configured = process.env.PUBLIC_ORIGIN;
-  if (configured) return origin === configured;
+  if (allowedOrigins.length) return allowedOrigins.includes(origin);
   return origin === `${req.protocol}://${req.get('host')}`;
 }
 
-function validateAudioFiles(files, limits) {
-  if (!Array.isArray(files) || files.length < 1 || files.length > limits.maxFiles) {
-    throw new Error(`Upload between 1 and ${limits.maxFiles} audio files.`);
+function validateAudioFiles(files) {
+  if (!Array.isArray(files) || files.length < 1) {
+    throw new Error('Upload at least one audio file.');
   }
-  let totalBytes = 0;
   return files.map(file => {
     if (!file || typeof file.data !== 'string' || !String(file.mimeType || '').startsWith('audio/')) {
       throw new Error('Only audio files are supported.');
     }
     const bytes = Math.ceil(Buffer.byteLength(file.data, 'base64'));
-    totalBytes += bytes;
     if (!Number.isFinite(bytes) || bytes <= 0) throw new Error('Invalid audio data.');
     return {
       data: file.data,
@@ -391,10 +467,15 @@ function createApp(options = {}) {
   const providerClient = options.providerClient || createProviderClient();
   const sessions = options.sessions || createSessionManager();
   const analysisCache = options.analysisCache || createAnalysisCache();
-  const limits = {
-    maxFiles: options.maxAudioFiles || envNumber('MAX_AUDIO_FILES', DEFAULT_MAX_AUDIO_FILES),
-    maxBytes: options.maxAudioBytes || envNumber('MAX_AUDIO_BYTES', DEFAULT_MAX_AUDIO_BYTES)
-  };
+  const allowedOrigins = options.allowedOrigins || envList(
+    'PUBLIC_ORIGINS',
+    process.env.PUBLIC_ORIGIN ? [process.env.PUBLIC_ORIGIN] : []
+  );
+  const secureCookies = options.secureCookies ?? (
+    process.env.COOKIE_SECURE === undefined
+      ? process.env.NODE_ENV === 'production'
+      : String(process.env.COOKIE_SECURE).toLowerCase() === 'true'
+  );
   const usageLocks = new Map();
 
   app.disable('x-powered-by');
@@ -402,7 +483,6 @@ function createApp(options = {}) {
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false
   }));
-  app.use(express.json({ limit: `${Math.ceil(limits.maxBytes * 1.4 / 1024 / 1024)}mb` }));
 
   app.use((req, res, next) => {
     const token = parseCookies(req.headers.cookie).qa_session;
@@ -426,13 +506,13 @@ function createApp(options = {}) {
   }
 
   function requireSameOrigin(req, res, next) {
-    if (!isSameOrigin(req)) return res.status(403).json({ error: 'Invalid request origin.' });
+    if (!isSameOrigin(req, allowedOrigins)) return res.status(403).json({ error: 'Invalid request origin.' });
     next();
   }
 
   app.get('/healthz', (req, res) => res.json({ ok: true }));
 
-  app.post('/api/login', loginLimiter, requireSameOrigin, async (req, res) => {
+  app.post('/api/login', loginLimiter, requireSameOrigin, express.json({ limit: '10kb' }), async (req, res) => {
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || '');
     if (!email || !password || email.length > 320 || password.length > 512) {
@@ -444,7 +524,7 @@ function createApp(options = {}) {
         return res.status(401).json({ error: 'Invalid email or password.' });
       }
       const token = sessions.create(user.email);
-      setSessionCookie(res, token);
+      setSessionCookie(res, token, secureCookies);
       return res.json({ user: publicUser(user) });
     } catch (error) {
       console.error('Login lookup failed:', error.message);
@@ -457,7 +537,7 @@ function createApp(options = {}) {
       const user = await sheetStore.findByEmail(req.session.email);
       if (!user) {
         sessions.destroy(req.sessionToken);
-        clearSessionCookie(res);
+        clearSessionCookie(res, secureCookies);
         return res.status(401).json({ error: 'Session is no longer valid.' });
       }
       return res.json({ user: publicUser(user) });
@@ -467,22 +547,41 @@ function createApp(options = {}) {
     }
   });
 
+  app.get('/api/audit-config', requireAuth, async (req, res) => {
+    try {
+      const configuration = await sheetStore.getAuditConfiguration();
+      return res.json(configuration);
+    } catch (error) {
+      console.error('Audit configuration lookup failed:', error.message);
+      return res.status(503).json({ error: 'Audit configuration is temporarily unavailable.' });
+    }
+  });
+
   app.post('/api/logout', requireSameOrigin, (req, res) => {
     if (req.sessionToken) sessions.destroy(req.sessionToken);
-    clearSessionCookie(res);
+    clearSessionCookie(res, secureCookies);
     res.json({ ok: true });
   });
 
-  app.post('/api/analyze', requireSameOrigin, requireAuth, async (req, res) => {
+  app.post('/api/analyze', requireSameOrigin, requireAuth, express.json({ limit: Infinity }), async (req, res) => {
     const provider = String(req.body?.provider || '').toLowerCase();
-    const promptText = String(req.body?.promptText || '').trim();
+    const mode = String(req.body?.mode || 'single');
+    const rawCategories = Array.isArray(req.body?.categories) ? req.body.categories : [];
+    const rawProductSelections = Array.isArray(req.body?.productSelections) ? req.body.productSelections : [];
+    const categories = [...new Set(rawCategories.map(item => String(item || '').trim()).filter(Boolean))];
+    const productSelections = rawProductSelections.map(item => ({
+      category: String(item?.category || '').trim(),
+      subCategory: String(item?.subCategory || '').trim()
+    })).filter(item => item.category && item.subCategory);
+    const customScorecard = String(req.body?.customScorecard || '').trim();
     if (!['gemini', 'openai'].includes(provider)) return res.status(400).json({ error: 'Unsupported AI provider.' });
-    if (!promptText || promptText.length > 100000) return res.status(400).json({ error: 'Invalid analysis prompt.' });
+    if (!['single', 'voice', 'coaching'].includes(mode)) return res.status(400).json({ error: 'Unsupported analysis mode.' });
+    if (categories.length > 50 || productSelections.length > 200) return res.status(400).json({ error: 'Too many product selections.' });
+    if (categories.some(item => item.length > 300) || productSelections.some(item => item.category.length > 300 || item.subCategory.length > 500)) return res.status(400).json({ error: 'Invalid product selection.' });
+    if (customScorecard.length > 100000) return res.status(400).json({ error: 'The custom scorecard is too long.' });
     let audioFiles;
     try {
-      audioFiles = validateAudioFiles(req.body?.audioFiles, limits);
-      const totalBytes = audioFiles.reduce((sum, file) => sum + Math.ceil(Buffer.byteLength(file.data, 'base64')), 0);
-      if (totalBytes > limits.maxBytes) throw new Error('Audio upload is too large.');
+      audioFiles = validateAudioFiles(req.body?.audioFiles);
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -492,6 +591,15 @@ function createApp(options = {}) {
       if (!user) return res.status(401).json({ error: 'Session is no longer valid.' });
       const apiKey = provider === 'gemini' ? user.geminiKey : user.openaiKey;
       if (!apiKey) return res.status(400).json({ error: `No ${provider} API key is configured for this account.` });
+      const [selectedProducts, sheetScorecard] = await Promise.all([
+        sheetStore.getProductBriefs(categories, productSelections),
+        customScorecard ? Promise.resolve('') : sheetStore.getQaScorecard()
+      ]);
+      if ((categories.length || productSelections.length) && !selectedProducts.length) return res.status(400).json({ error: 'The selected product briefs were not found.' });
+      const productBrief = selectedProducts.map(item => `[${item.category} / ${item.subCategory}]\n${item.brief}`).join('\n\n');
+      const scorecard = customScorecard || sheetScorecard;
+      if (!scorecard) return res.status(503).json({ error: 'The QA scorecard is unavailable.' });
+      const promptText = buildPromptText(mode, productBrief, scorecard, audioFiles.length);
       const cacheKey = analysisCacheKey(user, provider, promptText, audioFiles);
       const cachedReport = analysisCache.get(cacheKey);
       if (cachedReport) return res.json({ report: cachedReport, cached: true });
@@ -516,6 +624,7 @@ function createApp(options = {}) {
 
   if (fs.existsSync(DIST_INDEX_PATH)) {
     app.use('/assets', express.static(path.join(DIST_DIR, 'assets'), { index: false }));
+    app.get('/favicon.svg', (req, res) => res.sendFile(path.join(DIST_DIR, 'favicon.svg')));
     app.get('/', (req, res) => res.sendFile(DIST_INDEX_PATH));
   } else {
     app.get(['/', '/10ms-qa-audit-portal.html'], (req, res) => res.sendFile(INDEX_PATH));
@@ -537,5 +646,8 @@ module.exports = {
   createSessionManager,
   createAnalysisCache,
   rowsToUsers,
+  rowsToProductBriefs,
+  groupProductOptions,
+  buildPromptText,
   normalizeEmail
 };

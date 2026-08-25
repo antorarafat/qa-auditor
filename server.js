@@ -144,6 +144,11 @@ function qaPrompt(company, rubric, products, fileName) {
   const ceRules = rubric.criticalErrors.length ? rubric.criticalErrors.map(rule => `- ${rule}`).join('\n') : '- No CE rules are configured.';
   return `Analyze exactly one call (${fileName}) as a QA evaluator for ${company}. Write every narrative field in Bangla and cite precise [MM:SS] timestamps. Score every rubric row exactly once using its exact category, parameter, and maximum. Preserve raw achieved points.
 
+TIMESTAMPED EVIDENCE AND COACHING — MANDATORY:
+- Every deduction_justifications, strengths, and actionable_tips item must contain a precise call timestamp and its evidence-based detail.
+- Tie every suggestion to the exact moment that motivated it. Never return generic, untimestamped coaching advice.
+- Use a timestamp range such as [01:30-01:50] when the behavior spans a conversation segment.
+
 CRITICAL ERROR DECISION — STRICT ZERO-SCORE OVERRIDE:
 - Complete the CE decision before assigning the final score.
 - Evaluate every listed CE rule against the audio. If any listed rule is evidenced, ce_detected MUST be true. The server will then set the final score to zero regardless of raw achieved points.

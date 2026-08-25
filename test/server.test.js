@@ -34,8 +34,8 @@ function qaResult(overrides = {}) {
       { category: 'Closing', parameter: 'Summary', maximum: 2, achieved: 2, timestamp: '[00:50]', deduction_reason: '—' },
       { category: 'Closing', parameter: 'Goodbye', maximum: 3, achieved: 3, timestamp: '[00:55]', deduction_reason: '—' }
     ],
-    deduction_justifications: ['Permission উন্নত করুন'], strengths: ['ভালো সম্ভাষণ'],
-    script_corrections: [{ timestamp: '[00:03]', wrong: 'দুর্বল কথা', correct: 'সঠিক কথা' }], actionable_tips: ['প্রোবিং করুন'], overall_status: 'ভালো', ...overrides
+    deduction_justifications: [{ timestamp: '[00:03]', detail: 'Permission উন্নত করুন' }], strengths: [{ timestamp: '[00:01]', detail: 'ভালো সম্ভাষণ' }],
+    script_corrections: [{ timestamp: '[00:03]', wrong: 'দুর্বল কথা', correct: 'সঠিক কথা' }], actionable_tips: [{ timestamp: '[00:03]', detail: 'প্রোবিং করুন' }], overall_status: 'ভালো', ...overrides
   };
 }
 
@@ -80,6 +80,16 @@ test('accepts empty optional QA narratives and derives safe report content from 
   assert.match(result.deductionJustifications[0], /Permission/);
   assert.ok(result.strengths.length > 0);
   assert.ok(result.actionableTips.length > 0);
+  assert.match(result.actionableTips[0], /^\[00:03\]/);
+});
+
+test('requires precise call times for QA evidence and coaching suggestions', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const result = validateQaResult(qaResult(), rubric);
+  assert.match(result.deductionJustifications[0], /^\[00:03\]/);
+  assert.match(result.strengths[0], /^\[00:01\]/);
+  assert.match(result.actionableTips[0], /^\[00:03\]/);
+  assert.throws(() => validateQaResult(qaResult({ actionable_tips: [{ timestamp: '', detail: 'প্রোবিং করুন' }] }), rubric), /timestamp/);
 });
 
 test('constrains every Gemini score position to the exact live rubric row and weight', () => {
@@ -89,6 +99,8 @@ test('constrains every Gemini score position to the exact live rubric row and we
   assert.deepEqual(schema.prefixItems[1].properties.category.enum, ['Greetings']);
   assert.deepEqual(schema.prefixItems[1].properties.parameter.enum, ['Permission']);
   assert.deepEqual(schema.prefixItems[1].properties.maximum.enum, [3]);
+  const narrativeSchema = qaSchema(rubric).properties.actionable_tips.items;
+  assert.deepEqual(narrativeSchema.required, ['timestamp', 'detail']);
 });
 
 test('validates placeholders and reloads templates from disk', () => {

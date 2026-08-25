@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const request = require('supertest');
-const { createApp, rowsToUsers, rowsToProductBriefs, parseQaRubric } = require('../server');
+const { createApp, createProviderClient, rowsToUsers, rowsToProductBriefs, parseQaRubric } = require('../server');
 const { loadTemplate, renderTemplate, validateQaResult } = require('../lib/audit-pipeline');
 
 const RUBRIC = `১. Greetings (৫ নম্বর)\n- Greetings (২)\n- Permission (৩)\n\n২. Closing (৫ নম্বর)\n- Summary (২)\n- Goodbye (৩)\n\nCritical Errors\n- Wrong information\n- Rudeness`;
@@ -81,6 +81,22 @@ test('validates placeholders and reloads templates from disk', () => {
   fs.appendFileSync(path.join(dir, 'customer_voice_template.md'), '\nEDITED');
   assert.match(loadTemplate(dir, 'voice'), /EDITED/);
   assert.equal(renderTemplate('{{company_name}}', { company_name: 'Robi' }), 'Robi');
+});
+
+test('sends full JSON Schema through Gemini responseJsonSchema, not the legacy OpenAPI field', async () => {
+  let requestBody;
+  const client = createProviderClient({
+    geminiModels: ['gemini-test'],
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
+    }
+  });
+  const schema = { type: 'object', additionalProperties: false, required: ['status'], properties: { status: { type: 'string' } } };
+  const result = await client.callStructured('gemini', 'test-key', [], 'Return a status.', schema);
+  assert.deepEqual(result, { status: 'ok' });
+  assert.deepEqual(requestBody.generationConfig.responseJsonSchema, schema);
+  assert.equal('responseSchema' in requestBody.generationConfig, false);
 });
 
 test('auth config returns parameters and session/default behavior without secrets', async () => {

@@ -6,6 +6,8 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    volumes:
+      - ./templates:/app/templates:ro
     environment:
       NODE_ENV: production
       PORT: 3000

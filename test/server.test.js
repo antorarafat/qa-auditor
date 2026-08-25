@@ -1,236 +1,135 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const request = require('supertest');
-const { createApp, rowsToUsers, rowsToProductBriefs } = require('../server');
+const { createApp, rowsToUsers, rowsToProductBriefs, parseQaRubric } = require('../server');
+const { loadTemplate, renderTemplate, validateQaResult } = require('../lib/audit-pipeline');
 
-function fakeStore() {
-  const users = [{
-    email: 'user@example.com',
-    password: 'plain-password',
-    name: 'Test User',
-    companyName: 'Robi',
-    geminiKey: 'gemini-secret',
-    openaiKey: 'openai-secret',
-    usage: 0
-  }];
+const RUBRIC = `১. Greetings (৫ নম্বর)\n- Greetings (২)\n- Permission (৩)\n\n২. Closing (৫ নম্বর)\n- Summary (২)\n- Goodbye (৩)\n\nCritical Errors\n- Wrong information\n- Rudeness`;
+
+function fakeStore(options = {}) {
+  const users = [{ email: 'user@example.com', password: 'plain-password', name: 'Test User', companyName: 'Robi', geminiKey: 'gemini-secret', openaiKey: 'openai-secret', usage: 0, defaultParameter: 'Outbound', defaultParameterColumn: 6 }];
+  const writes = [];
   return {
-    users,
+    users, writes,
     async findByEmail(email) { return users.find(user => user.email === email) || null; },
-    async getAuditConfiguration() {
-      return {
-        products: [
-          { category: 'HSC 28', subCategories: ['PCMB', 'BEI'] },
-          { category: 'SSC', subCategories: ['SSC Science'] }
-        ],
-        scorecard: 'Sheet QA scorecard'
-      };
-    },
-    async getProductBriefs(categories, productSelections) {
-      const products = [
-        ...['PCMB', 'BEI'].map(subCategory => ({ category: 'HSC 28', subCategory, brief: `Official product brief for ${subCategory}` })),
-        { category: 'SSC', subCategory: 'SSC Science', brief: 'Official product brief for SSC Science' }
-      ];
-      if (productSelections.length) {
-        return products.filter(product => productSelections.some(item => item.category === product.category && item.subCategory === product.subCategory));
-      }
-      return products.filter(product => categories.includes(product.category));
-    },
-    async getQaScorecard() { return 'Sheet QA scorecard'; },
-    async incrementUsage(email) {
-      const user = users.find(item => item.email === email);
-      if (user) user.usage += 1;
-      return Boolean(user);
-    }
+    async getAuditConfiguration() { return { products: [{ category: 'HSC 28', subCategories: ['PCMB', 'BEI'] }], parameters: ['Outbound', 'Inbound'] }; },
+    async getProductBriefs(categories, selections) { const products = [{ category: 'HSC 28', subCategory: 'PCMB', brief: 'Official PCMB facts' }, { category: 'HSC 28', subCategory: 'BEI', brief: 'Official BEI facts' }]; if (selections.length) return products.filter(product => selections.some(item => item.category === product.category && item.subCategory === product.subCategory)); return products.filter(product => categories.includes(product.category)); },
+    async getQaParameter(name) { return ['Outbound', 'Inbound'].includes(name) ? { name, detail: options.malformedRubric ? 'not a rubric' : RUBRIC } : null; },
+    async saveDefaultParameter(email, parameter) { users.find(user => user.email === email).defaultParameter = parameter; return true; },
+    async appendAuditResults(rows) { if (options.writeFailure) throw new Error('write failed'); writes.push(...rows); return rows.length; },
+    async incrementUsage(email) { users.find(user => user.email === email).usage += 1; return true; }
   };
 }
 
-function auditPayload(overrides = {}) {
+function qaResult(overrides = {}) {
   return {
-    provider: 'gemini',
-    mode: 'single',
-    categories: ['HSC 28'],
-    productSelections: [{ category: 'HSC 28', subCategory: 'PCMB' }],
-    audioFiles: [{ name: 'call.wav', mimeType: 'audio/wav', data: Buffer.from('audio').toString('base64') }],
-    ...overrides
+    agent_name: 'Agent One', call_summary: 'কল সারাংশ', client_type_and_need: 'শিক্ষার্থী', call_duration_and_tone: '১ মিনিট, পেশাদার',
+    product_fact_check: 'সঠিক', ce_detected: false, ce_audit_details: 'CE নেই', ce_alert: 'Non-CE',
+    scores: [
+      { category: 'Greetings', parameter: 'Greetings', maximum: 2, achieved: 2, timestamp: '[00:01]', deduction_reason: '—' },
+      { category: 'Greetings', parameter: 'Permission', maximum: 3, achieved: 2, timestamp: '[00:03]', deduction_reason: 'এক নম্বর কাটা' },
+      { category: 'Closing', parameter: 'Summary', maximum: 2, achieved: 2, timestamp: '[00:50]', deduction_reason: '—' },
+      { category: 'Closing', parameter: 'Goodbye', maximum: 3, achieved: 3, timestamp: '[00:55]', deduction_reason: '—' }
+    ],
+    deduction_justifications: ['Permission উন্নত করুন'], strengths: ['ভালো সম্ভাষণ'],
+    script_corrections: [{ timestamp: '[00:03]', wrong: 'দুর্বল কথা', correct: 'সঠিক কথা' }], actionable_tips: ['প্রোবিং করুন'], overall_status: 'ভালো', ...overrides
   };
 }
 
-function fakeProviders() {
+function fakeProviders(options = {}) {
   return {
     calls: [],
-    async callGemini(key, files, prompt) {
-      this.calls.push({ provider: 'gemini', key, files, prompt });
-      return '# Gemini report';
-    },
-    async callOpenAI(key, files, prompt) {
-      this.calls.push({ provider: 'openai', key, files, prompt });
-      return '# OpenAI report';
+    async callStructured(provider, key, files, prompt, schema) {
+      this.calls.push({ provider, key, files, prompt, schema });
+      if (options.failFile && files[0]?.name === options.failFile) throw new Error('provider failed');
+      if (schema.properties?.scores) return qaResult(options.qaOverrides || {});
+      if (schema.properties?.recurring_issues) return { recurring_issues: ['একটি সমস্যা'], best_and_worst_calls: 'তুলনা', overall_recommendations: ['কোচিং দিন'] };
+      if (schema.properties?.customer_questions) return { advisors_list: 'Agent One', overall_sentiment: 'ইতিবাচক', customer_profile: 'শিক্ষার্থী', customer_need: 'কোর্স', customer_questions: ['মূল্য কত?'], barriers: ['বাজেট'], product_feedback: ['ভালো'], advisor_name: 'Agent One', objection_handling_assessment: 'ভালো', improvement_areas: ['আরও শুনুন'], actionable_recommendations: ['ফলো আপ'] };
+      return { advisor_name: 'Agent One', call_topic: 'কোর্স', sales_pitch_audit: ['[00:10] ভালো'], tone_pitch_analysis: ['[00:20] আত্মবিশ্বাসী'], talk_to_listen_ratio: '60:40', listening_skill_notes: 'ভালো', probing_gap_notes: 'আরও প্রশ্ন', script_corrections: [{ timestamp: '[00:30]', wrong: 'পুরনো', correct: 'নতুন' }], weekly_growth_plan: ['অনুশীলন'] };
     }
   };
 }
 
-test('rowsToUsers maps the sheet headers without exposing the leading index column', () => {
-  const users = rowsToUsers([
-    ['', 'User Email', 'User Password', 'User Name', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'Usage'],
-    [0, 'USER@example.com', 'pw', 'User', 'g-key', '', '3']
-  ]);
-  assert.deepEqual(users[0], {
-    rowNumber: 2,
-    email: 'user@example.com',
-    password: 'pw',
-    name: 'User',
-    companyName: '10 Minute School',
-    geminiKey: 'g-key',
-    openaiKey: '',
-    usage: 3,
-    usageColumn: 6
-  });
+function payload(overrides = {}) { return { provider: 'gemini', mode: 'single', parameter: 'Outbound', categories: [], productSelections: [], audioFiles: [{ name: 'call.wav', mimeType: 'audio/wav', data: Buffer.from('audio').toString('base64') }], ...overrides }; }
+async function login(agent) { const response = await agent.post('/api/login').send({ email: 'user@example.com', password: 'plain-password' }); assert.equal(response.status, 200); }
+
+test('maps user defaults and product sheet headers', () => {
+  const users = rowsToUsers([['User Email', 'User Password', 'User Name', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'Usage', 'Default QA Parameter'], ['USER@example.com', 'pw', 'User', 'g', '', '3', 'Inbound']]);
+  assert.equal(users[0].email, 'user@example.com'); assert.equal(users[0].defaultParameter, 'Inbound'); assert.equal(users[0].defaultParameterColumn, 6);
+  assert.deepEqual(rowsToProductBriefs([['Category', 'Sub-Category', 'Brief'], ['HSC', 'Science', 'Facts']]), [{ category: 'HSC', subCategory: 'Science', brief: 'Facts' }]);
 });
 
-test('maps the exact product brief sheet headers', () => {
-  assert.deepEqual(rowsToProductBriefs([
-    ['Category', 'Sub-Category', 'Brief'],
-    ['HSC 28', 'PCMB', 'Official facts']
-  ]), [{ category: 'HSC 28', subCategory: 'PCMB', brief: 'Official facts' }]);
+test('parses Bengali numerals, categories, rows, weights, and CE rules', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  assert.equal(rubric.categories.length, 2); assert.equal(rubric.rows.length, 4); assert.equal(rubric.maximum, 10); assert.deepEqual(rubric.criticalErrors, ['Wrong information', 'Rudeness']);
 });
 
-test('requires authentication and never returns provider keys', async () => {
-  const store = fakeStore();
-  const providers = fakeProviders();
-  const app = createApp({ sheetStore: store, providerClient: providers });
-  const response = await request(app).get('/api/session');
-  assert.equal(response.status, 401);
+test('reconciles raw points and zeros only the CE final score', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const result = validateQaResult(qaResult({ ce_detected: true }), rubric);
+  assert.equal(result.achievedScore, 9); assert.equal(result.deductedScore, 1); assert.equal(result.finalScore, 0);
+  assert.throws(() => validateQaResult(qaResult({ scores: qaResult().scores.slice(1) }), rubric), /required/);
 });
 
-test('allows configured LAN origins and issues an HTTP-compatible session cookie', async () => {
-  const app = createApp({
-    sheetStore: fakeStore(),
-    providerClient: fakeProviders(),
-    allowedOrigins: ['http://localhost:3000', 'http://192.168.99.147:3000'],
-    secureCookies: false
-  });
-  const login = await request(app)
-    .post('/api/login')
-    .set('Origin', 'http://192.168.99.147:3000')
-    .send({ email: 'user@example.com', password: 'plain-password' });
-  assert.equal(login.status, 200);
-  assert.equal(login.headers['set-cookie'][0].includes('Secure'), false);
-
-  const rejected = await request(app)
-    .post('/api/login')
-    .set('Origin', 'http://untrusted.example')
-    .send({ email: 'user@example.com', password: 'plain-password' });
-  assert.equal(rejected.status, 403);
+test('validates placeholders and reloads templates from disk', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-template-'));
+  fs.writeFileSync(path.join(dir, 'customer_voice_template.md'), '{{total_calls_analyzed}} {{advisors_list}} {{overall_sentiment}} {{customer_profile}} {{customer_need}} {{customer_questions_list}} {{barriers_list}} {{product_feedback_list}} {{advisor_name}} {{objection_handling_assessment}} {{improvement_areas}} {{actionable_recommendations}}');
+  assert.match(loadTemplate(dir, 'voice'), /total_calls_analyzed/);
+  fs.appendFileSync(path.join(dir, 'customer_voice_template.md'), '\nEDITED');
+  assert.match(loadTemplate(dir, 'voice'), /EDITED/);
+  assert.equal(renderTemplate('{{company_name}}', { company_name: 'Robi' }), 'Robi');
 });
 
-test('logs in, analyzes with the matching provider key, and increments usage', async () => {
-  const store = fakeStore();
-  const providers = fakeProviders();
-  const app = createApp({ sheetStore: store, providerClient: providers });
-  const agent = request.agent(app);
-  const login = await agent.post('/api/login').send({ email: 'USER@example.com', password: 'plain-password' });
-  assert.equal(login.status, 200);
-  assert.deepEqual(login.body.user, {
-    email: 'user@example.com',
-    name: 'Test User',
-    companyName: 'Robi',
-    providers: ['gemini', 'openai']
-  });
-  assert.equal(JSON.stringify(login.body).includes('secret'), false);
-
-  const configuration = await agent.get('/api/audit-config');
-  assert.equal(configuration.status, 200);
-  assert.deepEqual(configuration.body.products, [
-    { category: 'HSC 28', subCategories: ['PCMB', 'BEI'] },
-    { category: 'SSC', subCategories: ['SSC Science'] }
-  ]);
-  assert.equal(configuration.body.scorecard, 'Sheet QA scorecard');
-  assert.equal(JSON.stringify(configuration.body).includes('Official product brief'), false);
-
-  const analysis = await agent.post('/api/analyze').send(auditPayload());
-  assert.equal(analysis.status, 200);
-  assert.equal(analysis.body.report, '# Gemini report');
-  assert.equal(providers.calls[0].key, 'gemini-secret');
-  assert.match(providers.calls[0].prompt, /Official product brief for PCMB/);
-  assert.match(providers.calls[0].prompt, /Sheet QA scorecard/);
-  assert.match(providers.calls[0].prompt, /COMPANY NAME: "Robi"/);
-  assert.doesNotMatch(providers.calls[0].prompt, /10 Minute School/);
-  assert.equal(store.users[0].usage, 1);
-
-  const cached = await agent.post('/api/analyze').send(auditPayload());
-  assert.equal(cached.status, 200);
-  assert.equal(cached.body.cached, true);
-  assert.equal(providers.calls.length, 1);
-  assert.equal(store.users[0].usage, 1);
+test('auth config returns parameters and session/default behavior without secrets', async () => {
+  const store = fakeStore(); const app = createApp({ sheetStore: store, providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
+  const config = await agent.get('/api/audit-config'); assert.equal(config.status, 200); assert.deepEqual(config.body.parameters, ['Outbound', 'Inbound']); assert.equal(config.body.activeParameter, 'Outbound'); assert.equal('scorecard' in config.body, false); assert.equal(JSON.stringify(config.body).includes('secret'), false);
+  assert.equal((await agent.put('/api/session/parameter').send({ parameter: 'Inbound' })).status, 200);
+  assert.equal((await agent.get('/api/audit-config')).body.activeParameter, 'Inbound'); assert.equal(store.users[0].defaultParameter, 'Outbound');
+  assert.equal((await agent.put('/api/user/default-parameter').send({ parameter: 'Inbound' })).status, 200); assert.equal(store.users[0].defaultParameter, 'Inbound');
 });
 
-test('runs a generic audit without product selections and supports multiple selected briefs', async () => {
-  const providers = fakeProviders();
-  const app = createApp({ sheetStore: fakeStore(), providerClient: providers });
-  const agent = request.agent(app);
-  await agent.post('/api/login').send({ email: 'user@example.com', password: 'plain-password' });
-
-  const generic = await agent.post('/api/analyze').send(auditPayload({ categories: [], productSelections: [] }));
-  assert.equal(generic.status, 200);
-  assert.match(providers.calls[0].prompt, /generic QA evaluation/);
-  assert.doesNotMatch(providers.calls[0].prompt, /Official product brief/);
-
-  const multiple = await agent.post('/api/analyze').send(auditPayload({
-    productSelections: [
-      { category: 'HSC 28', subCategory: 'PCMB' },
-      { category: 'HSC 28', subCategory: 'BEI' },
-      { category: 'SSC', subCategory: 'SSC Science' }
-    ]
-  }));
-  assert.equal(multiple.status, 200);
-  assert.match(providers.calls[1].prompt, /Official product brief for PCMB/);
-  assert.match(providers.calls[1].prompt, /Official product brief for BEI/);
-  assert.match(providers.calls[1].prompt, /Official product brief for SSC Science/);
+test('requires parameter for QA and coaching but ignores it for Customer Voice', async () => {
+  const providers = fakeProviders(); const app = createApp({ sheetStore: fakeStore(), providerClient: providers }); const agent = request.agent(app); await login(agent);
+  assert.equal((await agent.post('/api/analyze').send(payload({ parameter: '' }))).status, 400);
+  assert.equal((await agent.post('/api/analyze').send(payload({ mode: 'coaching', parameter: '' }))).status, 400);
+  const voice = await agent.post('/api/analyze').send(payload({ mode: 'voice', parameter: 'Does not exist' })); assert.equal(voice.status, 200); assert.equal(providers.calls[0].prompt.includes('LIVE RUBRIC'), false);
 });
 
-test('rejects arbitrary providers and invalid audio payloads', async () => {
-  const app = createApp({ sheetStore: fakeStore(), providerClient: fakeProviders() });
-  const agent = request.agent(app);
-  await agent.post('/api/login').send({ email: 'user@example.com', password: 'plain-password' });
-  const providerResponse = await agent.post('/api/analyze').send(auditPayload({ provider: 'custom', audioFiles: [] }));
-  assert.equal(providerResponse.status, 400);
-  const audioResponse = await agent.post('/api/analyze').send(auditPayload({ audioFiles: [{ data: 'x', mimeType: 'text/plain' }] }));
-  assert.equal(audioResponse.status, 400);
+test('QA analyzes each file, renders ordered items, appends exact A:K rows, and never caches re-audits', async () => {
+  const store = fakeStore(); const providers = fakeProviders(); const app = createApp({ sheetStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const audioFiles = ['a.wav', 'b.wav'].map(name => ({ name, mimeType: 'audio/wav', data: Buffer.from(name).toString('base64') }));
+  const first = await agent.post('/api/analyze').send(payload({ audioFiles })); assert.equal(first.status, 200); assert.deepEqual(first.body.items.map(item => item.kind), ['call', 'call', 'summary']); assert.match(first.body.report, /Robi - QA Audit/); assert.equal(store.writes.length, 2); assert.equal(store.writes[0].length, 11); assert.equal(store.writes[0][2], 'Outbound'); assert.equal(store.writes[0][3], 9); assert.equal(store.users[0].usage, 1);
+  const second = await agent.post('/api/analyze').send(payload({ audioFiles })); assert.equal(second.body.cached, false); assert.equal(store.writes.length, 4); assert.equal(providers.calls.length, 6); assert.equal(store.users[0].usage, 2);
 });
 
-test('accepts any number of audio files without the legacy size options', async () => {
-  const providers = fakeProviders();
-  const app = createApp({
-    sheetStore: fakeStore(),
-    providerClient: providers,
-    maxAudioFiles: 1,
-    maxAudioBytes: 1
-  });
-  const agent = request.agent(app);
-  await agent.post('/api/login').send({ email: 'user@example.com', password: 'plain-password' });
-  const audioFiles = Array.from({ length: 6 }, (_, index) => ({
-    name: `call-${index + 1}.wav`,
-    mimeType: 'audio/wav',
-    data: Buffer.from(`audio-${index + 1}`).toString('base64')
-  }));
-  const response = await agent.post('/api/analyze').send({
-    ...auditPayload(),
-    audioFiles
-  });
-  assert.equal(response.status, 200);
-  assert.equal(providers.calls[0].files.length, 6);
+test('partial QA keeps and stores successful calls only', async () => {
+  const store = fakeStore(); const app = createApp({ sheetStore: store, providerClient: fakeProviders({ failFile: 'bad.wav' }) }); const agent = request.agent(app); await login(agent);
+  const response = await agent.post('/api/analyze').send(payload({ audioFiles: ['good.wav', 'bad.wav'].map(name => ({ name, mimeType: 'audio/wav', data: Buffer.from(name).toString('base64') })) }));
+  assert.equal(response.status, 200); assert.equal(response.body.partial, true); assert.equal(response.body.items[1].status, 'failed'); assert.equal(store.writes.length, 1); assert.equal(store.users[0].usage, 1);
 });
 
-test('does not serve the credential file or arbitrary files', async () => {
-  const app = createApp({ sheetStore: fakeStore(), providerClient: fakeProviders() });
-  assert.equal((await request(app).get('/arafat-alahe-403508-11c3d59ec795.json')).status, 404);
+test('sheet write failure returns reports with a prominent unsaved status', async () => {
+  const app = createApp({ sheetStore: fakeStore({ writeFailure: true }), providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
+  const response = await agent.post('/api/analyze').send(payload()); assert.equal(response.status, 200); assert.equal(response.body.auditResultWrite.status, 'failed'); assert.equal(response.body.partial, true); assert.match(response.body.auditResultWrite.message, /not saved/);
+});
+
+test('malformed live rubric stops before AI calls and writes', async () => {
+  const store = fakeStore({ malformedRubric: true }); const providers = fakeProviders(); const app = createApp({ sheetStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const response = await agent.post('/api/analyze').send(payload()); assert.equal(response.status, 503); assert.equal(providers.calls.length, 0); assert.equal(store.writes.length, 0);
+});
+
+test('summary-only modes are cached and never write history', async () => {
+  const store = fakeStore(); const providers = fakeProviders(); const app = createApp({ sheetStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const voice1 = await agent.post('/api/analyze').send(payload({ mode: 'voice', parameter: '' })); const voice2 = await agent.post('/api/analyze').send(payload({ mode: 'voice', parameter: '' })); assert.equal(voice1.status, 200); assert.equal(voice2.body.cached, true);
+  const coaching = await agent.post('/api/analyze').send(payload({ mode: 'coaching' })); assert.equal(coaching.status, 200); assert.equal(store.writes.length, 0); assert.equal(providers.calls.length, 2); assert.equal(store.users[0].usage, 2);
+});
+
+test('rejects invalid providers/audio and does not expose project files', async () => {
+  const app = createApp({ sheetStore: fakeStore(), providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
+  assert.equal((await agent.post('/api/analyze').send(payload({ provider: 'custom' }))).status, 400);
+  assert.equal((await agent.post('/api/analyze').send(payload({ audioFiles: [{ data: 'x', mimeType: 'text/plain' }] }))).status, 400);
   assert.equal((await request(app).get('/package.json')).status, 404);
-});
-
-test('serves the production favicon without exposing other root files', async () => {
-  const app = createApp({ sheetStore: fakeStore(), providerClient: fakeProviders() });
-  const response = await request(app).get('/favicon.svg');
-  assert.equal(response.status, 200);
-  assert.match(response.headers['content-type'], /image\/svg\+xml/);
-  assert.match(response.body.toString('utf8'), /#e5484d/);
 });

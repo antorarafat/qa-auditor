@@ -14,7 +14,7 @@ const DIST_DIR = path.join(ROOT, 'dist');
 const DIST_INDEX_PATH = path.join(DIST_DIR, 'index.html');
 const TEMPLATE_DIR = process.env.TEMPLATE_DIR || path.join(ROOT, 'templates');
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
 const DEFAULT_OPENAI_MODELS = ['gpt-4o-audio-preview', 'gpt-4o-mini-audio-preview'];
 
 function envNumber(name, fallback) { const value = Number.parseInt(process.env[name] || '', 10); return Number.isFinite(value) && value > 0 ? value : fallback; }
@@ -127,7 +127,7 @@ function parseJsonText(text) { const cleaned = String(text || '').trim().replace
 function createProviderClient(config = {}) {
   const fetchImpl = config.fetchImpl || fetch; const geminiModels = config.geminiModels || envList('GEMINI_MODELS', DEFAULT_GEMINI_MODELS); const openaiModels = config.openaiModels || envList('OPENAI_MODELS', DEFAULT_OPENAI_MODELS);
   async function callGemini(apiKey, audioFiles, prompt, schema) {
-    const payload = { contents: [{ parts: [{ text: prompt }, ...audioFiles.map(file => ({ inlineData: { mimeType: file.mimeType, data: file.data } }))] }], generationConfig: { responseMimeType: 'application/json', responseJsonSchema: schema } }; let lastError = 'No supported Gemini model responded.'; let lastStatus;
+    const payload = { contents: [{ parts: [{ text: prompt }, ...audioFiles.map(file => ({ inlineData: { mimeType: file.mimeType, data: file.data } }))] }], generationConfig: { temperature: 0, responseMimeType: 'application/json', responseJsonSchema: schema } }; let lastError = 'No supported Gemini model responded.'; let lastStatus;
     for (const model of geminiModels) { const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(payload) }); const data = await response.json().catch(() => ({})); if (response.ok) { const text = data.candidates?.[0]?.content?.parts?.find(part => part.text)?.text; if (text) return parseJsonText(text); lastError = 'Gemini returned no structured result.'; continue; } const message = String(data.error?.message || 'Gemini request failed'); console.error(`Gemini model ${model} returned HTTP ${response.status}: ${message.replace(/\s+/g, ' ').slice(0, 300)}`); if (response.status === 404 || response.status === 429 || response.status >= 500 || /not found|deprecated|not supported/i.test(message)) { lastError = message; lastStatus = response.status; continue; } const error = new Error(`Gemini request rejected (HTTP ${response.status}).`); error.providerStatus = response.status; throw error; }
     const error = new Error(lastError); if (lastStatus) error.providerStatus = lastStatus; throw error;
   }
@@ -140,7 +140,27 @@ function createProviderClient(config = {}) {
 }
 
 function productContext(products) { return products.length ? products.map(item => `[${item.category} / ${item.subCategory}]\n${item.brief}`).join('\n\n') : 'No product was selected. Do a generic evaluation and do not assume product-specific facts.'; }
-function qaPrompt(company, rubric, products, fileName) { return `Analyze exactly one call (${fileName}) as a QA evaluator for ${company}. Write every narrative field in Bangla and cite precise [MM:SS] timestamps. Score every rubric row exactly once using its exact category, parameter, and maximum. Preserve raw achieved points. Set ce_detected true only when a listed CE rule is evidenced in the audio.\n\nPRODUCT CONTEXT:\n${productContext(products)}\n\nLIVE RUBRIC (${rubric.name}):\n${rubric.source}`; }
+function qaPrompt(company, rubric, products, fileName) {
+  const ceRules = rubric.criticalErrors.length ? rubric.criticalErrors.map(rule => `- ${rule}`).join('\n') : '- No CE rules are configured.';
+  return `Analyze exactly one call (${fileName}) as a QA evaluator for ${company}. Write every narrative field in Bangla and cite precise [MM:SS] timestamps. Score every rubric row exactly once using its exact category, parameter, and maximum. Preserve raw achieved points.
+
+CRITICAL ERROR DECISION — STRICT ZERO-SCORE OVERRIDE:
+- Complete the CE decision before assigning the final score.
+- Evaluate every listed CE rule against the audio. If any listed rule is evidenced, ce_detected MUST be true. The server will then set the final score to zero regardless of raw achieved points.
+- For Rudeness: direct scolding, shaming, belittling, mocking, insulting, contemptuous questioning, or humiliating a customer/student is a CE even when no profanity is used. Repeated blame, sarcastic comments about guessing, or asking why a student is so inattentive qualify when the wording and tone support that interpretation.
+- Mild firmness, ordinary coaching, or hurried speech alone is not Rudeness CE.
+- For every detected CE, quote the exact words and cite precise [MM:SS] timestamps in ce_audit_details.
+- Keep ce_detected, ce_audit_details, ce_alert, the relevant score-row deduction, and overall_status mutually consistent. Never describe a listed CE in the evidence while returning ce_detected false.
+
+LISTED CE RULES FROM THE LIVE RUBRIC:
+${ceRules}
+
+PRODUCT CONTEXT:
+${productContext(products)}
+
+LIVE RUBRIC (${rubric.name}):
+${rubric.source}`;
+}
 function summaryPrompt(company, parameter, results) { const compact = results.map(result => ({ file: result.fileName, agent: result.agentName, score: result.finalScore, ce: result.ceDetected, deductions: result.deductionJustifications })); return `Create a concise Bangla run summary for ${company} using only these validated successful ${parameter} QA results. Identify recurring issues, compare best/worst calls, and give actionable recommendations.\n${JSON.stringify(compact)}`; }
 function voicePrompt(company, products, count) { return `Analyze ${count} calls for ${company} as a Customer Insights analyst. Return one Bangla summary grounded only in the recordings. Include precise timestamps where useful. This is not a QA scorecard and must not score calls.\n\nPRODUCT CONTEXT:\n${productContext(products)}`; }
 function coachingPrompt(company, rubric, products, count) { return `Analyze ${count} calls for ${company} as a senior sales communication coach. Return one Bangla coaching summary with precise [MM:SS] timestamps. Use the selected ${rubric.name} rubric only as coaching context; do not produce scores.\n\nPRODUCT CONTEXT:\n${productContext(products)}\n\nLIVE RUBRIC:\n${rubric.source}`; }
@@ -196,4 +216,4 @@ function createApp(options = {}) {
 }
 
 if (require.main === module) { require('dotenv').config(); const port = envNumber('PORT', 3000); createApp().listen(port, () => console.log(`QA Auditor listening on port ${port}`)); }
-module.exports = { createApp, createGoogleSheetStore, createProviderClient, createSessionManager, createAnalysisCache, rowsToUsers, rowsToProductBriefs, groupProductOptions, normalizeEmail, parseQaRubric: pipeline.parseQaRubric };
+module.exports = { createApp, createGoogleSheetStore, createProviderClient, createSessionManager, createAnalysisCache, rowsToUsers, rowsToProductBriefs, groupProductOptions, normalizeEmail, qaPrompt, parseQaRubric: pipeline.parseQaRubric };

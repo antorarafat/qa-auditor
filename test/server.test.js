@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const request = require('supertest');
-const { createApp, createProviderClient, rowsToUsers, rowsToProductBriefs, parseQaRubric } = require('../server');
+const { createApp, createProviderClient, rowsToUsers, rowsToProductBriefs, parseQaRubric, qaPrompt } = require('../server');
 const { loadTemplate, loadAndValidateTemplates, renderTemplate, validateQaResult, renderQaCall, qaSchema } = require('../lib/audit-pipeline');
 
 const RUBRIC = `১. Greetings (৫ নম্বর)\n- Greetings (২)\n- Permission (৩)\n\n২. Closing (৫ নম্বর)\n- Summary (২)\n- Goodbye (৩)\n\nCritical Errors\n- Wrong information\n- Rudeness`;
@@ -134,7 +134,39 @@ test('sends full JSON Schema through Gemini responseJsonSchema, not the legacy O
   const result = await client.callStructured('gemini', 'test-key', [], 'Return a status.', schema);
   assert.deepEqual(result, { status: 'ok' });
   assert.deepEqual(requestBody.generationConfig.responseJsonSchema, schema);
+  assert.equal(requestBody.generationConfig.temperature, 0);
   assert.equal('responseSchema' in requestBody.generationConfig, false);
+});
+
+test('makes the live CE rules and rudeness zero-score override explicit', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const prompt = qaPrompt('Robi', rubric, [], 'call.mp3');
+  assert.match(prompt, /STRICT ZERO-SCORE OVERRIDE/);
+  assert.match(prompt, /direct scolding, shaming, belittling/);
+  assert.match(prompt, /Never describe a listed CE in the evidence while returning ce_detected false/);
+  assert.match(prompt, /- Rudeness/);
+});
+
+test('uses full Gemini Flash before Flash Lite when the primary model is unavailable', async () => {
+  const previous = process.env.GEMINI_MODELS;
+  delete process.env.GEMINI_MODELS;
+  const requestedModels = [];
+  try {
+    const client = createProviderClient({
+      fetchImpl: async url => {
+        requestedModels.push(url);
+        if (requestedModels.length === 1) return { ok: false, status: 429, async json() { return { error: { message: 'Quota exceeded' } }; } };
+        return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
+      }
+    });
+    await client.callStructured('gemini', 'test-key', [], 'Return ok.', { type: 'object', properties: { status: { type: 'string' } } });
+  } finally {
+    if (previous === undefined) delete process.env.GEMINI_MODELS;
+    else process.env.GEMINI_MODELS = previous;
+  }
+  assert.match(requestedModels[0], /gemini-3\.6-flash/);
+  assert.match(requestedModels[1], /gemini-3\.5-flash:generateContent/);
+  assert.doesNotMatch(requestedModels[1], /flash-lite/);
 });
 
 test('falls back to the next Gemini model on quota or temporary provider errors', async () => {

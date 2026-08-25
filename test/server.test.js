@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const request = require('supertest');
 const { createApp, createProviderClient, rowsToUsers, rowsToProductBriefs, parseQaRubric } = require('../server');
-const { loadTemplate, renderTemplate, validateQaResult, qaSchema } = require('../lib/audit-pipeline');
+const { loadTemplate, loadAndValidateTemplates, renderTemplate, validateQaResult, renderQaCall, qaSchema } = require('../lib/audit-pipeline');
 
 const RUBRIC = `১. Greetings (৫ নম্বর)\n- Greetings (২)\n- Permission (৩)\n\n২. Closing (৫ নম্বর)\n- Summary (২)\n- Goodbye (৩)\n\nCritical Errors\n- Wrong information\n- Rudeness`;
 
@@ -98,6 +98,27 @@ test('validates placeholders and reloads templates from disk', () => {
   fs.appendFileSync(path.join(dir, 'customer_voice_template.md'), '\nEDITED');
   assert.match(loadTemplate(dir, 'voice'), /EDITED/);
   assert.equal(renderTemplate('{{company_name}}', { company_name: 'Robi' }), 'Robi');
+});
+
+test('approved templates render as document headings and real Markdown tables', async () => {
+  const templates = loadAndValidateTemplates(path.join(__dirname, '..', 'templates'), ['qaCall', 'qaSummary', 'coaching', 'voice']);
+  assert.match(templates.qaCall, /^<!--[\s\S]*?# 📊/);
+  assert.match(templates.qaSummary, /\| :--- \| ---: \|/);
+  assert.match(templates.coaching, /^<!--[\s\S]*?# 🎯/);
+  assert.match(templates.voice, /^<!--[\s\S]*?# 🗣️/);
+
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const result = validateQaResult(qaResult(), rubric);
+  const report = renderQaCall(templates.qaCall, result, 'Robi', '2026-08-25');
+  assert.match(report, /^# 📊 Robi - QA Audit/);
+  assert.match(report, /\| :--- \| ---: \| ---: \|/);
+  assert.match(report, /\| \*\*Greetings\*\*<br>Permission \| 3 \| 2 \| 1 \|/);
+  assert.match(report, /## ৭\. অ্যাকশনেবল পরামর্শ/);
+  const { marked } = await import('marked');
+  const html = marked.parse(report);
+  assert.match(html, /<h1>.*Robi - QA Audit/);
+  assert.match(html, /<table>/);
+  assert.match(html, /<th[^>]*>প্যারামিটার<\/th>/);
 });
 
 test('sends full JSON Schema through Gemini responseJsonSchema, not the legacy OpenAPI field', async () => {

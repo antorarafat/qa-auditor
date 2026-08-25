@@ -169,7 +169,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .result-section { margin-top: 24px; scroll-margin-top: 92px; }
 .report-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
 .report-toolbar h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 20px; }
-.result-items { display: grid; gap: 14px; }
+.result-items { display: grid; gap: 20px; }
 .storage-warning { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 13px 15px; border: 1px solid #fdb022; border-radius: 11px; background: #fffaeb; color: #93370d; font-size: 13px; }
 .score-pill { margin-left: auto; padding: 4px 8px; border-radius: 99px; background: #ecfdf3; color: #067647; font-size: 12px; }
 .score-pill.ce { background: #fff0f0; color: #b42318; }
@@ -177,16 +177,32 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .failed-result .card-content { display: flex; gap: 12px; align-items: flex-start; color: #b42318; }
 .failed-result p { margin: 4px 0 0; color: #7a271a; font-size: 13px; }
 
-.report-card { margin-top: 22px; border: 0; box-shadow: 0 14px 45px rgba(23, 32, 51, .06); scroll-margin-top: 92px; }
+.report-card { border: 0; box-shadow: 0 14px 45px rgba(23, 32, 51, .07); scroll-margin-top: 92px; overflow: hidden; }
+.report-card > .card-header { padding: 16px 24px; border-bottom: 1px solid var(--line); background: #fafbfc; }
+.report-card > .card-header .card-title { min-width: 0; font-size: 14px; }
+.report-card > .card-header .card-title:not(:has(.score-pill)) { color: #475467; }
+.report-card > .card-content { padding: 34px 38px 42px; }
 .report-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .result-kicker { width: fit-content; margin-bottom: 8px; padding: 4px 8px; border-radius: 99px; background: #ecfdf3; color: var(--success); display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; }
 .report-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.report-content { color: #263248; line-height: 1.7; font-size: 14px; overflow-x: auto; }
-.report-content h1 { color: #b42318; font-size: 24px; border-bottom: 2px solid #fee4e2; padding-bottom: 8px; }
-.report-content h2 { color: #344054; font-size: 19px; margin-top: 25px; }
-.report-content table { border-collapse: collapse; min-width: 620px; width: 100%; font-size: 12px; }
-.report-content th, .report-content td { border: 1px solid #e4e7ec; padding: 8px; text-align: left; }
-.report-content th { background: #f6f7fb; }
+.report-content { color: #252a34; font-family: 'Noto Sans Bengali', 'DM Sans', sans-serif; font-size: 14px; line-height: 1.72; overflow-x: auto; }
+.report-content > :first-child { margin-top: 0; }
+.report-content > :last-child { margin-bottom: 0; }
+.report-content h1 { margin: 0 0 28px; color: #d92d20; font-size: clamp(23px, 2.5vw, 29px); line-height: 1.28; letter-spacing: -.025em; }
+.report-content h2 { margin: 34px 0 15px; padding-top: 23px; border-top: 1px solid #d0d5dd; color: #204bb5; font-size: 18px; line-height: 1.38; letter-spacing: -.012em; break-after: avoid; }
+.report-content h1 + h2 { margin-top: 0; padding-top: 0; border-top: 0; }
+.report-content p { margin: 0 0 14px; }
+.report-content ul, .report-content ol { margin: 0 0 18px; padding-left: 25px; }
+.report-content li { padding-left: 3px; }
+.report-content li + li { margin-top: 7px; }
+.report-content strong { color: #111827; font-weight: 700; }
+.report-content blockquote { margin: 22px 0 0; padding: 14px 17px; border-left: 4px solid var(--primary); border-radius: 0 8px 8px 0; background: #fff7f7; color: #344054; }
+.report-content blockquote p { margin: 0; }
+.report-content table { width: 100%; min-width: 760px; margin: 16px 0 24px; border: 1px solid #98a2b3; border-collapse: collapse; background: #fff; font-size: 12px; line-height: 1.5; }
+.report-content th, .report-content td { padding: 10px 9px; border: 1px solid #b7bec8; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.report-content th { background: #eef1f5; color: #172033; font-weight: 700; }
+.report-content tbody tr:nth-child(even) { background: #fafbfc; }
+.report-content tbody tr:last-child { background: #f2f4f7; }
 
 @media (max-width: 900px) {
   .audit-layout { grid-template-columns: 1fr; }
@@ -217,12 +233,30 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .report-actions .ui-button { width: 100%; }
   .card-header { padding: 20px 18px 0; }
   .card-content { padding: 18px; }
+  .report-card > .card-header { padding: 14px 18px; }
+  .report-card > .card-content { padding: 26px 20px 32px; }
+  .report-content h1 { font-size: 22px; }
+  .report-content h2 { font-size: 17px; }
 }
 
 @media print {
-  .topbar, .page-heading, .audit-layout { display: none !important; }
+  @page { size: A4 portrait; margin: 16mm 14mm; }
+  * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .topbar, .page-heading, .audit-layout, .report-toolbar, .storage-warning { display: none !important; }
   body { background: #fff; }
   .page-container { width: 100%; padding: 0; }
-  .report-card { border: 0; box-shadow: none; }
-  .report-actions, .result-kicker { display: none; }
+  .result-section { margin: 0; }
+  .result-items { display: block; }
+  .report-card { margin: 0; border: 0; border-radius: 0; box-shadow: none; overflow: visible; break-after: page; page-break-after: always; }
+  .report-card:last-child { break-after: auto; page-break-after: auto; }
+  .report-card > .card-header { display: none; }
+  .report-card > .card-content { padding: 0; }
+  .report-content { color: #111; font-size: 10.5pt; line-height: 1.55; overflow: visible; }
+  .report-content h1 { margin-bottom: 20pt; font-size: 20pt; }
+  .report-content h2 { margin-top: 20pt; padding-top: 13pt; font-size: 13.5pt; }
+  .report-content table { min-width: 0; margin: 10pt 0 15pt; font-size: 8pt; page-break-inside: auto; }
+  .report-content thead { display: table-header-group; }
+  .report-content tr { break-inside: avoid; page-break-inside: avoid; }
+  .report-content th, .report-content td { padding: 5pt; }
+  .failed-result { break-after: auto; page-break-after: auto; }
 }

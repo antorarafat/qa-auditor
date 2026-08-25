@@ -28,6 +28,30 @@ const copy = {
 function formatBytes(bytes) { return `${(bytes / (1024 * 1024)).toFixed(2)} MB`; }
 function renderMarkdown(markdown) { return DOMPurify.sanitize(marked.parse(markdown || '')); }
 
+const WORD_REPORT_STYLES = `
+  @page WordSection1 { size: 8.27in 11.69in; margin: .62in .55in; }
+  body { margin: 0; color: #252a34; font-family: "Nirmala UI", "Arial Unicode MS", Arial, sans-serif; font-size: 10.5pt; line-height: 1.55; }
+  .result-items { display: block; }
+  .report-card { page: WordSection1; page-break-after: always; }
+  .report-card:last-child { page-break-after: auto; }
+  .card-header { display: none; }
+  .card-content { padding: 0; }
+  .report-content h1 { margin: 0 0 20pt; color: #d92d20; font-size: 20pt; line-height: 1.25; }
+  .report-content h2 { margin: 20pt 0 10pt; padding-top: 12pt; border-top: 1pt solid #d0d5dd; color: #204bb5; font-size: 13.5pt; line-height: 1.35; page-break-after: avoid; }
+  .report-content h1 + h2 { margin-top: 0; padding-top: 0; border-top: 0; }
+  .report-content p { margin: 0 0 9pt; }
+  .report-content ul, .report-content ol { margin: 0 0 12pt; padding-left: 20pt; }
+  .report-content li { margin-bottom: 4pt; }
+  .report-content strong { color: #111827; }
+  .report-content blockquote { margin: 14pt 0 0; padding: 9pt 11pt; border-left: 3pt solid #e5484d; background: #fff7f7; }
+  .report-content blockquote p { margin: 0; }
+  .report-content table { width: 100%; margin: 10pt 0 15pt; border: 1pt solid #98a2b3; border-collapse: collapse; font-size: 8pt; line-height: 1.35; }
+  .report-content th, .report-content td { padding: 5pt; border: 1pt solid #b7bec8; text-align: left; vertical-align: top; }
+  .report-content th { background: #eef1f5; color: #172033; font-weight: bold; }
+  .report-content tbody tr:last-child { background: #f2f4f7; }
+  .failed-result { color: #b42318; }
+`;
+
 function App() {
   const [language, setLanguage] = useState(() => localStorage.getItem('qa-language') || 'en');
   const [user, setUser] = useState(null); const [loginState, setLoginState] = useState({ loading: true, error: '' });
@@ -68,7 +92,16 @@ function App() {
   }
 
   function exportPdf() { window.print(); }
-  function exportWord() { if (!reportRef.current) return; const html = `<html><head><meta charset="utf-8"><title>QA Report</title><style>body{font-family:Arial}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:8px}</style></head><body>${reportRef.current.innerHTML}</body></html>`; const link = document.createElement('a'); link.href = `data:application/msword;charset=utf-8,${encodeURIComponent(html)}`; link.download = `QA_Audit_${new Date().toISOString().slice(0, 10)}.doc`; link.click(); }
+  function exportWord() {
+    if (!reportRef.current) return;
+    const html = `<!doctype html><html lang="${language === 'bn' ? 'bn' : 'en'}"><head><meta charset="utf-8"><title>QA Report</title><style>${WORD_REPORT_STYLES}</style></head><body><div class="result-items">${reportRef.current.innerHTML}</div></body></html>`;
+    const url = URL.createObjectURL(new Blob(['\ufeff', html], { type: 'application/msword' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `QA_Audit_${new Date().toISOString().slice(0, 10)}.doc`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
   async function copyReport() { if (!navigator.clipboard) return setStatus(t.copyUnavailable); await navigator.clipboard.writeText(result?.report || ''); setStatus(language === 'en' ? 'Report copied.' : 'রিপোর্ট কপি হয়েছে।'); }
   function toggleLanguage() { setLanguage(current => current === 'en' ? 'bn' : 'en'); }
 

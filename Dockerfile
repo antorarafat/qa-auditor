@@ -18,6 +18,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY server.js 10ms-qa-audit-portal.html ./
 COPY lib ./lib
+COPY scripts ./scripts
 COPY templates ./templates
 COPY --from=frontend-build /build/dist ./dist
 

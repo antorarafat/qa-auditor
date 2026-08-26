@@ -23,9 +23,15 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  ConfirmDialog,
+  DatePicker,
   Input,
   Label,
   Select,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   Textarea,
 } from "./components/ui";
 
@@ -264,9 +270,13 @@ export function AccountView({ user, onSignedOut }) {
     }
   }
   async function removeKey(name) {
-    if (!confirm(`Remove your ${name} API key?`)) return;
-    await api(`/api/account/api-keys/${name}`, { method: "DELETE" });
-    setKeys((current) => ({ ...current, [name]: { configured: false } }));
+    try {
+      await api(`/api/account/api-keys/${name}`, { method: "DELETE" });
+      setKeys((current) => ({ ...current, [name]: { configured: false } }));
+      setMessage("API key removed.");
+    } catch (error) {
+      setMessage(error.message);
+    }
   }
   return (
     <Workspace
@@ -311,13 +321,18 @@ export function AccountView({ user, onSignedOut }) {
                     </span>
                   </div>
                   {keys[name]?.configured && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeKey(name)}
-                    >
-                      Remove
-                    </Button>
+                    <ConfirmDialog
+                      trigger={
+                        <Button variant="ghost" size="sm">
+                          Remove
+                        </Button>
+                      }
+                      title={`Remove ${name === "gemini" ? "Google Gemini" : "OpenAI"} key?`}
+                      description="Audits using this provider will be unavailable until you add another key."
+                      confirmLabel="Remove key"
+                      destructive
+                      onConfirm={() => removeKey(name)}
+                    />
                   )}
                 </div>
               ))}
@@ -326,11 +341,12 @@ export function AccountView({ user, onSignedOut }) {
               <Label>Provider</Label>
               <Select
                 value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-              >
-                <option value="gemini">Google Gemini</option>
-                <option value="openai">OpenAI</option>
-              </Select>
+                onValueChange={setProvider}
+                options={[
+                  { value: "gemini", label: "Google Gemini" },
+                  { value: "openai", label: "OpenAI" },
+                ]}
+              />
               <Label>New API key</Label>
               <Input
                 type="password"
@@ -550,38 +566,50 @@ export function ReportsView({ user }) {
           </div>
           <Select
             aria-label="Report mode"
-            value={filters.mode}
-            onChange={(e) => setFilters({ ...filters, mode: e.target.value })}
-          >
-            <option value="">All modes</option>
-            <option value="single">QA scorecard</option>
-            <option value="voice">Customer voice</option>
-            <option value="coaching">Advisor coaching</option>
-          </Select>
+            value={filters.mode || "all"}
+            placeholder="All modes"
+            onValueChange={(mode) =>
+              setFilters({ ...filters, mode: mode === "all" ? "" : mode })
+            }
+            options={[
+              { value: "all", label: "All modes" },
+              { value: "single", label: "QA scorecard" },
+              { value: "voice", label: "Customer voice" },
+              { value: "coaching", label: "Advisor coaching" },
+            ]}
+          />
           <Select
             aria-label="CE status"
-            value={filters.ce}
-            onChange={(e) => setFilters({ ...filters, ce: e.target.value })}
-          >
-            <option value="">All CE statuses</option>
-            <option value="true">Has CE</option>
-            <option value="false">Non-CE</option>
-          </Select>
+            value={filters.ce || "all"}
+            placeholder="All CE statuses"
+            onValueChange={(ce) =>
+              setFilters({ ...filters, ce: ce === "all" ? "" : ce })
+            }
+            options={[
+              { value: "all", label: "All CE statuses" },
+              { value: "true", label: "Has CE" },
+              { value: "false", label: "Non-CE" },
+            ]}
+          />
           {user.role === "admin" && (
             <Select
               aria-label="Report owner"
-              value={filters.ownerUserId}
-              onChange={(e) =>
-                setFilters({ ...filters, ownerUserId: e.target.value })
+              value={filters.ownerUserId || "all"}
+              placeholder="All users"
+              onValueChange={(ownerUserId) =>
+                setFilters({
+                  ...filters,
+                  ownerUserId: ownerUserId === "all" ? "" : ownerUserId,
+                })
               }
-            >
-              <option value="">All users</option>
-              {owners.map((owner) => (
-                <option key={owner.id} value={owner.id}>
-                  {owner.username}
-                </option>
-              ))}
-            </Select>
+              options={[
+                { value: "all", label: "All users" },
+                ...owners.map((owner) => ({
+                  value: owner.id,
+                  label: owner.username,
+                })),
+              ]}
+            />
           )}
           <Input
             aria-label="Parameter"
@@ -591,17 +619,17 @@ export function ReportsView({ user }) {
               setFilters({ ...filters, parameter: e.target.value })
             }
           />
-          <Input
+          <DatePicker
             aria-label="From date"
-            type="date"
             value={filters.from}
-            onChange={(e) => setFilters({ ...filters, from: e.target.value })}
+            onChange={(from) => setFilters({ ...filters, from })}
+            placeholder="From date"
           />
-          <Input
+          <DatePicker
             aria-label="To date"
-            type="date"
             value={filters.to}
-            onChange={(e) => setFilters({ ...filters, to: e.target.value })}
+            onChange={(to) => setFilters({ ...filters, to })}
+            placeholder="To date"
           />
           <Input
             aria-label="Minimum score"
@@ -628,7 +656,9 @@ export function ReportsView({ user }) {
       <Notice message={message} error />
       <div className="history-list">
         {data.items.map((item) => (
-          <button
+          <Button
+            type="button"
+            variant="outline"
             className="history-row"
             key={item.id}
             onClick={() => openReport(item.id)}
@@ -657,7 +687,7 @@ export function ReportsView({ user }) {
               </span>
             </div>
             {item.ceCount > 0 && <span className="ce-badge">CE</span>}
-          </button>
+          </Button>
         ))}
         {!busy && !data.items.length && (
           <div className="empty-state">
@@ -791,11 +821,14 @@ function UsersAdmin() {
                 </div>
                 <Select
                   value={user.role}
-                  onChange={(e) => update(user, "role", e.target.value)}
-                >
-                  <option value="user">User</option>
-                  <option value="admin">Admin</option>
-                </Select>
+                  aria-label={`Role for ${user.username}`}
+                  className="role-select"
+                  onValueChange={(role) => update(user, "role", role)}
+                  options={[
+                    { value: "user", label: "User" },
+                    { value: "admin", label: "Admin" },
+                  ]}
+                />
                 <Button
                   variant="outline"
                   size="sm"
@@ -1049,22 +1082,19 @@ function ProductsAdmin() {
             <form className="stack-form" onSubmit={createSubCategory}>
               <Label>Category</Label>
               <Select
-                required
                 value={subCategoryForm.categoryId}
-                onChange={(event) =>
+                placeholder="Choose a category"
+                onValueChange={(categoryId) =>
                   setSubCategoryForm({
                     ...subCategoryForm,
-                    categoryId: event.target.value,
+                    categoryId,
                   })
                 }
-              >
-                <option value="">Choose a category</option>
-                {activeCategories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </Select>
+                options={activeCategories.map((category) => ({
+                  value: category.id,
+                  label: category.name,
+                }))}
+              />
               <Label>New sub-category</Label>
               <div className="inline-create">
                 <Input
@@ -1113,31 +1143,25 @@ function ProductsAdmin() {
             <form className="stack-form" onSubmit={saveBrief}>
               <Label>Category</Label>
               <Select
-                required
                 value={form.categoryId}
-                onChange={(event) => selectCategory(event.target.value)}
-              >
-                <option value="">Choose a category</option>
-                {activeCategories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </Select>
+                placeholder="Choose a category"
+                onValueChange={selectCategory}
+                options={activeCategories.map((category) => ({
+                  value: category.id,
+                  label: category.name,
+                }))}
+              />
               <Label>Sub-category</Label>
               <Select
-                required
                 disabled={!form.categoryId}
                 value={form.subCategoryId}
-                onChange={(event) => selectSubCategory(event.target.value)}
-              >
-                <option value="">Choose a sub-category</option>
-                {availableSubCategories.map((subCategory) => (
-                  <option key={subCategory.id} value={subCategory.id}>
-                    {subCategory.name}
-                  </option>
-                ))}
-              </Select>
+                placeholder="Choose a sub-category"
+                onValueChange={selectSubCategory}
+                options={availableSubCategories.map((subCategory) => ({
+                  value: subCategory.id,
+                  label: subCategory.name,
+                }))}
+              />
               <Label>Product description</Label>
               <Textarea
                 rows="9"
@@ -1540,23 +1564,25 @@ export function AdminView() {
       title="Admin"
       subtitle="Manage access and future audit configuration."
     >
-      <div className="subnav">
-        {[
-          ["users", "Users"],
-          ["company", "Company"],
-          ["products", "Products"],
-          ["scorecards", "Scorecards"],
-        ].map(([value, label]) => (
-          <Button
-            key={value}
-            variant={tab === value ? "default" : "ghost"}
-            onClick={() => setTab(value)}
-          >
-            {label}
-          </Button>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="subnav" aria-label="Admin sections">
+          {[
+            ["users", "Users"],
+            ["company", "Company"],
+            ["products", "Products"],
+            ["scorecards", "Scorecards"],
+          ].map(([value, label]) => (
+            <TabsTrigger key={value} value={value}>
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {Object.entries(views).map(([value, content]) => (
+          <TabsContent key={value} value={value}>
+            {content}
+          </TabsContent>
         ))}
-      </div>
-      {views[tab]}
+      </Tabs>
     </Workspace>
   );
 }

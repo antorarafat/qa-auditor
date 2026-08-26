@@ -35,8 +35,13 @@ import {
   CardTitle,
   Input,
   Label,
+  RadioGroup,
+  RadioGroupItem,
   Select,
   Separator,
+  Tabs,
+  TabsList,
+  TabsTrigger,
 } from "./components/ui";
 import { MultiSelect } from "./components/multi-select";
 import { SingleSelect } from "./components/single-select";
@@ -659,35 +664,26 @@ function App() {
               <span>QA Auditor</span>
             </div>
           </div>
-          <nav className="app-nav" aria-label="Primary navigation">
-            <Button
-              variant={view === "audit" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setView("audit")}
-            >
-              <ClipboardCheck size={15} /> Audit
-            </Button>
-            <Button
-              variant={view === "reports" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setView("reports")}
-            >
-              <History size={15} /> Reports
-            </Button>
-            {user.role === "admin" && (
-              <Button
-                variant={view === "admin" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setView("admin")}
-              >
-                <ShieldCheck size={15} /> Admin
-              </Button>
-            )}
-          </nav>
+          <Tabs className="app-nav-shell" value={view} onValueChange={setView}>
+            <TabsList className="app-nav" aria-label="Primary navigation">
+              <TabsTrigger value="audit">
+                <ClipboardCheck size={15} /> Audit
+              </TabsTrigger>
+              <TabsTrigger value="reports">
+                <History size={15} /> Reports
+              </TabsTrigger>
+              {user.role === "admin" && (
+                <TabsTrigger value="admin">
+                  <ShieldCheck size={15} /> Admin
+                </TabsTrigger>
+              )}
+            </TabsList>
+          </Tabs>
           <div className="topbar-actions">
             <LanguageToggle language={language} onClick={toggleLanguage} />
-            <button
+            <Button
               type="button"
+              variant="ghost"
               className="account-chip"
               onClick={() => setView("account")}
             >
@@ -700,7 +696,7 @@ function App() {
                 </strong>
                 <span>{user.email}</span>
               </div>
-            </button>
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -733,8 +729,9 @@ function App() {
                     </div>
                     <h2>{t.recordings}</h2>
                   </div>
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
                     className={`dropzone ${dragActive ? "drag-active" : ""} ${files.length ? "compact" : ""}`}
                     onClick={() => inputRef.current?.click()}
                     onDragEnter={(event) => {
@@ -757,7 +754,7 @@ function App() {
                       <strong>{t.drop}</strong>
                       <span>{t.supported}</span>
                     </div>
-                  </button>
+                  </Button>
                   <input
                     ref={inputRef}
                     type="file"
@@ -802,27 +799,29 @@ function App() {
                     <div className="inline-heading">
                       <h2>{t.mode}</h2>
                     </div>
-                    <div className="mode-grid" role="radiogroup">
+                    <RadioGroup
+                      className="mode-grid"
+                      value={mode}
+                      onValueChange={setMode}
+                      disabled={busy}
+                      aria-label={t.mode}
+                    >
                       {[
                         ["single", ClipboardCheck, t.qaMode],
                         ["voice", MessageSquareQuote, t.voiceMode],
                         ["coaching", BarChart3, t.coachingMode],
                       ].map(([value, Icon, label]) => (
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={mode === value}
+                        <RadioGroupItem
                           className={`mode-card ${mode === value ? "selected" : ""}`}
                           key={value}
-                          onClick={() => setMode(value)}
-                          disabled={busy}
+                          value={value}
                         >
                           <Icon size={19} />
                           <span>{label}</span>
                           {mode === value && <Check size={16} />}
-                        </button>
+                        </RadioGroupItem>
                       ))}
-                    </div>
+                    </RadioGroup>
                   </div>
                   <div className="run-action">
                     <Button
@@ -864,16 +863,13 @@ function App() {
                         <Select
                           id="provider"
                           value={provider}
-                          onChange={(event) => setProvider(event.target.value)}
+                          onValueChange={setProvider}
                           disabled={busy}
-                        >
-                          {providers.includes("gemini") && (
-                            <option value="gemini">{t.gemini}</option>
-                          )}
-                          {providers.includes("openai") && (
-                            <option value="openai">{t.openai}</option>
-                          )}
-                        </Select>
+                          options={providers.map((value) => ({
+                            value,
+                            label: value === "gemini" ? t.gemini : t.openai,
+                          }))}
+                        />
                       </div>
                     ) : (
                       <div className="provider-summary">
@@ -1114,14 +1110,16 @@ function LoginScreen({
                   setLoginForm({ ...loginForm, password: event.target.value })
                 }
               />
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 className="password-toggle"
                 onClick={() => setShowPassword((current) => !current)}
                 aria-label={showPassword ? t.hidePassword : t.showPassword}
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
+              </Button>
             </div>
             {state.error && (
               <div className="error-message" role="alert">

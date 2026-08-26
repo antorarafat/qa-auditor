@@ -52,11 +52,11 @@ export function MultiSelect({
                 })}
               </CommandPrimitive.Group>
             </CommandPrimitive.List>
-            {selectedOptions.length > 0 && <button type="button" className="multi-select-clear" onClick={() => onChange([])}>{clearText}</button>}
+            {selectedOptions.length > 0 && <Button type="button" variant="ghost" size="sm" className="multi-select-clear" onClick={() => onChange([])}>{clearText}</Button>}
           </CommandPrimitive>
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
-    {selectedOptions.length > 0 && <div className="multi-select-chips">{selectedOptions.map(option => <button type="button" key={option.value} onClick={() => toggle(option.value)} disabled={disabled} title={`${clearText}: ${option.label}`}><span>{option.label}</span><X size={13} aria-hidden="true" /></button>)}</div>}
+    {selectedOptions.length > 0 && <div className="multi-select-chips">{selectedOptions.map(option => <Button type="button" variant="ghost" size="sm" key={option.value} onClick={() => toggle(option.value)} disabled={disabled} title={`${clearText}: ${option.label}`}><span>{option.label}</span><X size={13} aria-hidden="true" /></Button>)}</div>}
   </div>;
 }

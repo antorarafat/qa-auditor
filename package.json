@@ -8,12 +8,16 @@
     "start": "node server.js",
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test"
+    "test": "node --test",
+    "db:backup": "node scripts/secure-backup.js",
+    "db:migrate:dry-run": "node scripts/migrate.js",
+    "db:migrate": "node scripts/migrate.js --apply"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.1.0",
     "@radix-ui/react-popover": "^1.1.23",
     "cmdk": "^1.1.1",
     "dompurify": "^3.2.6",

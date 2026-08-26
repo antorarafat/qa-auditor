@@ -568,3 +568,24 @@ test('rejects invalid providers/audio and does not expose project files', async 
   assert.equal((await agent.post('/api/analyze').send(payload({ audioFiles: [{ data: 'x', mimeType: 'text/plain' }] }))).status, 400);
   assert.equal((await request(app).get('/package.json')).status, 404);
 });
+
+test('server authorization blocks regular users from every admin surface', async () => {
+  const app = createApp({ dataStore: fakeStore(), providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
+  for (const path of ['/api/admin/users', '/api/admin/company', '/api/admin/product-briefs', '/api/admin/scorecards']) assert.equal((await agent.get(path)).status, 403);
+});
+
+test('temporary-password users can change password but cannot access product data', async () => {
+  const store = fakeStore(); store.users[0].mustChangePassword = true; store.users[0].id = 'test-user';
+  store.changePassword = async () => true;
+  const app = createApp({ dataStore: store, providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
+  const config = await agent.get('/api/audit-config'); assert.equal(config.status, 428); assert.equal(config.body.errorCode, 'password_change_required');
+  assert.equal((await agent.put('/api/account/password').send({ currentPassword: 'plain-password', newPassword: 'Strong-Temporary-Replacement-42' })).status, 200);
+});
+
+test('personal API-key APIs return only masked metadata', async () => {
+  const store = fakeStore(); store.users[0].id = 'test-user';
+  store.setApiKey = async (_id, provider, key, status) => ({ configured: true, lastFour: key.slice(-4), status });
+  const app = createApp({ dataStore: store, providerClient: fakeProviders(), apiKeyValidator: async () => ({ valid: true, status: 'verified' }) }); const agent = request.agent(app); await login(agent);
+  const secret = 'personal-provider-key-1234'; const response = await agent.put('/api/account/api-keys/gemini').send({ apiKey: secret });
+  assert.equal(response.status, 200); assert.equal(response.body.apiKey.lastFour, '1234'); assert.equal(JSON.stringify(response.body).includes(secret), false);
+});

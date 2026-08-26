@@ -29,7 +29,10 @@ function envList(name, fallback) { const value = (process.env[name] || '').split
 function normalizeEmail(value) { return String(value || '').trim().toLowerCase(); }
 function safeEqual(left, right) { const a = Buffer.from(String(left || '')); const b = Buffer.from(String(right || '')); return a.length === b.length && crypto.timingSafeEqual(a, b); }
 
-function publicUser(user) { return { email: user.email, name: user.name, companyName: user.companyName || '10 Minute School', providers: [user.geminiKey ? 'gemini' : null, user.openaiKey ? 'openai' : null].filter(Boolean) }; }
+function publicUser(user) {
+  const providers = user.providers || [user.geminiKey ? 'gemini' : null, user.openaiKey ? 'openai' : null].filter(Boolean);
+  return { id: user.id || String(user._id || ''), email: user.email, username: user.username || user.name, name: user.username || user.name, role: user.role || 'user', status: user.status || 'active', mustChangePassword: Boolean(user.mustChangePassword), companyName: user.companyName || 'QA Auditor', providers, apiKeyStatus: user.apiKeyStatus || Object.fromEntries(['gemini', 'openai'].map(provider => [provider, { configured: providers.includes(provider) }])) };
+}
 function createAnalysisCache(config = {}) {
   const ttlMs = config.ttlMs || envNumber('AI_CACHE_TTL_MS', 6 * 60 * 60 * 1000); const maxEntries = config.maxEntries || envNumber('AI_CACHE_MAX_ENTRIES', 100); const entries = new Map();
   function prune() { const now = Date.now(); for (const [key, entry] of entries) if (entry.expiresAt <= now) entries.delete(key); while (entries.size > maxEntries) entries.delete(entries.keys().next().value); }
@@ -133,8 +136,8 @@ function createProviderClient(config = {}) {
         if (response.ok) {
           const text = data.candidates?.[0]?.content?.parts?.find(part => part.text)?.text;
           if (text) {
-            if (!schema) { console.log(`Gemini model ${model} completed the Markdown analysis.`); return String(text).trim(); }
-            try { const result = parseJsonText(text); console.log(`Gemini model ${model} completed the structured analysis.`); return result; }
+            if (!schema) { console.log(`Gemini model ${model} completed the Markdown analysis.`); const value = String(text).trim(); return callOptions.withMeta ? { value, model } : value; }
+            try { const value = parseJsonText(text); console.log(`Gemini model ${model} completed the structured analysis.`); return callOptions.withMeta ? { value, model } : value; }
             catch { attempts.push({ model, round: round + 1, errorCode: 'invalid_response' }); lastFailure = providerError('Gemini returned malformed structured JSON.', 'invalid_response', true, response.status, attempts); continue; }
           }
           attempts.push({ model, round: round + 1, errorCode: 'invalid_response', status: response.status });
@@ -183,18 +186,18 @@ function createProviderClient(config = {}) {
     if (Date.now() >= deadline && lastFailure.retryable) throw providerError('Gemini call deadline exceeded.', 'provider_timeout', true, lastFailure.providerStatus, attempts);
     throw lastFailure;
   }
-  async function callOpenAI(apiKey, audioFiles, prompt, schema) {
+  async function callOpenAI(apiKey, audioFiles, prompt, schema, withMeta = false) {
     const content = [{ type: 'text', text: `${prompt}\n\nReturn JSON only matching this schema: ${JSON.stringify(schema)}` }, ...audioFiles.map(file => ({ type: 'input_audio', input_audio: { data: file.data, format: /wav/i.test(`${file.mimeType} ${file.name}`) ? 'wav' : 'mp3' } }))]; let lastError = 'No supported OpenAI model responded.';
-    for (const model of openaiModels) { const response = await fetchImpl('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, modalities: ['text'], response_format: { type: 'json_object' }, messages: [{ role: 'user', content }] }) }); const data = await response.json().catch(() => ({})); if (response.ok) { const text = data.choices?.[0]?.message?.content; if (text) return parseJsonText(text); lastError = 'OpenAI returned no structured result.'; continue; } const message = String(data.error?.message || 'OpenAI request failed'); console.error(`OpenAI model ${model} returned HTTP ${response.status}: ${message.replace(/\s+/g, ' ').slice(0, 300)}`); if (response.status === 401 || response.status === 403) throw providerError('OpenAI credential rejected.', 'invalid_credentials', false, response.status); if (response.status === 429) { lastError = message; continue; } if (response.status === 404 || response.status >= 500 || /not found|deprecated|not supported|model/i.test(message)) { lastError = message; continue; } throw providerError(`OpenAI request rejected (HTTP ${response.status}).`, 'request_rejected', false, response.status); }
+    for (const model of openaiModels) { const response = await fetchImpl('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, modalities: ['text'], response_format: { type: 'json_object' }, messages: [{ role: 'user', content }] }) }); const data = await response.json().catch(() => ({})); if (response.ok) { const text = data.choices?.[0]?.message?.content; if (text) { const value = parseJsonText(text); return withMeta ? { value, model } : value; } lastError = 'OpenAI returned no structured result.'; continue; } const message = String(data.error?.message || 'OpenAI request failed'); console.error(`OpenAI model ${model} returned HTTP ${response.status}: ${message.replace(/\s+/g, ' ').slice(0, 300)}`); if (response.status === 401 || response.status === 403) throw providerError('OpenAI credential rejected.', 'invalid_credentials', false, response.status); if (response.status === 429) { lastError = message; continue; } if (response.status === 404 || response.status >= 500 || /not found|deprecated|not supported|model/i.test(message)) { lastError = message; continue; } throw providerError(`OpenAI request rejected (HTTP ${response.status}).`, 'request_rejected', false, response.status); }
     throw providerError(lastError, /quota|rate limit/i.test(lastError) ? 'rate_limited' : 'provider_unavailable', true);
   }
-  async function callOpenAIMarkdown(apiKey, audioFiles, prompt) {
+  async function callOpenAIMarkdown(apiKey, audioFiles, prompt, withMeta = false) {
     const content = [{ type: 'text', text: prompt }, ...audioFiles.map(file => ({ type: 'input_audio', input_audio: { data: file.data, format: /wav/i.test(`${file.mimeType} ${file.name}`) ? 'wav' : 'mp3' } }))];
     let lastError = 'No supported OpenAI model responded.';
     for (const model of openaiModels) {
       const response = await fetchImpl('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, modalities: ['text'], messages: [{ role: 'user', content }] }) });
       const data = await response.json().catch(() => ({}));
-      if (response.ok) { const text = data.choices?.[0]?.message?.content; if (text) return String(text).trim(); lastError = 'OpenAI returned no report text.'; continue; }
+      if (response.ok) { const text = data.choices?.[0]?.message?.content; if (text) { const value = String(text).trim(); return withMeta ? { value, model } : value; } lastError = 'OpenAI returned no report text.'; continue; }
       const message = String(data.error?.message || 'OpenAI request failed');
       if (response.status === 401 || response.status === 403) throw providerError('OpenAI credential rejected.', 'invalid_credentials', false, response.status);
       if (response.status === 429 || response.status >= 500 || response.status === 404 || /not found|deprecated|not supported|model/i.test(message)) { lastError = message; continue; }
@@ -205,11 +208,34 @@ function createProviderClient(config = {}) {
   return {
     async callStructured(provider, key, files, prompt, schema) { return provider === 'gemini' ? callGemini(key, files, prompt, schema, geminiModels, { maxRounds: 1 }) : callOpenAI(key, files, prompt, schema); },
     async callMarkdown(provider, key, files, prompt) { return provider === 'gemini' ? callGemini(key, files, prompt, null, geminiModels, { maxRounds: 1 }) : callOpenAIMarkdown(key, files, prompt); },
+    async callStructuredWithMeta(provider, key, files, prompt, schema) { return provider === 'gemini' ? callGemini(key, files, prompt, schema, geminiModels, { maxRounds: 1, withMeta: true }) : callOpenAI(key, files, prompt, schema, true); },
+    async callMarkdownWithMeta(provider, key, files, prompt) { return provider === 'gemini' ? callGemini(key, files, prompt, null, geminiModels, { maxRounds: 1, withMeta: true }) : callOpenAIMarkdown(key, files, prompt, true); },
     callGemini, callOpenAI, callOpenAIMarkdown
   };
 }
 
 function productContext(products) { return products.length ? products.map(item => `[${item.category} / ${item.subCategory}]\n${item.brief}`).join('\n\n') : 'No product was selected. Do a generic evaluation and do not assume product-specific facts.'; }
+function cleanText(value, maximum = 300) { return String(value || '').trim().slice(0, maximum); }
+function validateEmail(value) { const email = normalizeEmail(value); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 320) throw Object.assign(new Error('Enter a valid email address.'), { statusCode: 400 }); return email; }
+function validateUsername(value) { const username = cleanText(value, 80); if (username.length < 2) throw Object.assign(new Error('Username must be at least 2 characters.'), { statusCode: 400 }); return username; }
+function scorecardDocument(input) {
+  const name = cleanText(input?.name, 120); const categories = Array.isArray(input?.definition?.categories) ? input.definition.categories : []; const criticalErrors = Array.isArray(input?.definition?.criticalErrors) ? input.definition.criticalErrors.map(item => cleanText(item, 300)).filter(Boolean) : [];
+  if (!name || !categories.length) throw Object.assign(new Error('Scorecard name and at least one category are required.'), { statusCode: 400 });
+  const normalized = categories.map(category => ({ name: cleanText(category?.name, 150), weight: Number(category?.weight), rows: (Array.isArray(category?.rows) ? category.rows : []).map(row => ({ name: cleanText(row?.name, 180), weight: Number(row?.weight) })) }));
+  if (new Set(normalized.map(category => category.name.toLowerCase())).size !== normalized.length) throw Object.assign(new Error('Scorecard category names must be unique.'), { statusCode: 400 });
+  const rowNames = new Set();
+  for (const category of normalized) {
+    if (!category.name || !Number.isFinite(category.weight) || category.weight <= 0 || !category.rows.length || category.rows.some(row => !row.name || !Number.isFinite(row.weight) || row.weight <= 0)) throw Object.assign(new Error('Every scorecard category and row needs a name and positive weight.'), { statusCode: 400 });
+    for (const row of category.rows) { const key = `${category.name}\0${row.name}`.toLowerCase(); if (rowNames.has(key)) throw Object.assign(new Error('Scorecard rows must be unique inside each category.'), { statusCode: 400 }); rowNames.add(key); }
+    category.maximum = category.rows.reduce((sum, row) => sum + row.weight, 0);
+    if (Math.abs(category.maximum - category.weight) > 0.0001) throw Object.assign(new Error(`${category.name} row weights must total ${category.weight}.`), { statusCode: 400 });
+  }
+  const overallTotal = Number(input?.definition?.overallTotal ?? input?.definition?.total); const calculatedTotal = normalized.reduce((sum, category) => sum + category.weight, 0);
+  if (!Number.isFinite(overallTotal) || overallTotal <= 0 || Math.abs(calculatedTotal - overallTotal) > 0.0001) throw Object.assign(new Error(`Category weights must total the overall score of ${overallTotal || 0}.`), { statusCode: 400 });
+  const detail = normalized.map((category, index) => `${index + 1}. ${category.name} (${category.maximum} points)\n${category.rows.map(row => `- ${row.name} (${row.weight})`).join('\n')}`).join('\n\n') + `\n\nCritical Errors${criticalErrors.length ? `\n${criticalErrors.map(rule => `- ${rule}`).join('\n')}` : ''}`;
+  pipeline.parseQaRubric(name, detail);
+  return { name, detail, definition: { categories: normalized.map(({ name: categoryName, weight, rows }) => ({ name: categoryName, weight, rows })), criticalErrors, overallTotal, total: calculatedTotal } };
+}
 function qaPrompt(company, rubric, products, fileName) {
   const ceRules = rubric.criticalErrors.length ? rubric.criticalErrors.map(rule => `- ${rule}`).join('\n') : '- No CE rules are configured.';
   return `Analyze exactly one call (${fileName}) as a QA evaluator for ${company}. Write every narrative field in Bangla and cite precise [MM:SS] timestamps. Score every rubric row exactly once using its exact category, parameter, and maximum. Preserve raw achieved points.
@@ -331,14 +357,15 @@ async function prepareAnalysis(dataStore, user, input, audioFiles, templateDir) 
 async function cacheGet(dataStore, memoryCache, key) { return dataStore.getCachedAnalysis ? dataStore.getCachedAnalysis(key) : memoryCache.get(key); }
 async function cacheSet(dataStore, memoryCache, key, result, ttlMs) { return dataStore.setCachedAnalysis ? dataStore.setCachedAnalysis(key, result, ttlMs) : memoryCache.set(key, result); }
 
-async function runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, input, audioFiles) {
+async function runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, input, audioFiles, runContext = {}) {
   const prepared = await prepareAnalysis(dataStore, user, input, audioFiles, templateDir);
   const cached = await cacheGet(dataStore, memoryCache, prepared.cacheKey);
   if (cached) return { ...cached, cached: true, auditResultWrite: cached.mode === 'single' ? { status: 'cached', savedRows: 0 } : cached.auditResultWrite };
-  const timestamp = new Date().toISOString(); const evaluationDate = timestamp.slice(0, 10); let responseBody;
+  const timestamp = new Date().toISOString(); const evaluationDate = timestamp.slice(0, 10); const jobId = runContext.jobId || crypto.randomUUID(); let responseBody; let actualModel = '';
   if (input.mode === 'single') {
     const prompt = qaMarkdownPrompt(user.companyName, prepared.rubric, prepared.products, audioFiles, evaluationDate);
-    const reportMarkdown = await providerClient.callMarkdown(input.provider, prepared.apiKey, audioFiles, prompt);
+    const providerResult = providerClient.callMarkdownWithMeta ? await providerClient.callMarkdownWithMeta(input.provider, prepared.apiKey, audioFiles, prompt) : { value: await providerClient.callMarkdown(input.provider, prepared.apiKey, audioFiles, prompt), model: '' };
+    const reportMarkdown = providerResult.value; actualModel = providerResult.model || '';
     const parsedCalls = pipeline.parseQaMarkdownReport(reportMarkdown, audioFiles.map(file => file.name), prepared.rubric);
     const remainingCalls = [...parsedCalls]; const items = []; const results = [];
     for (const file of audioFiles) {
@@ -356,17 +383,24 @@ async function runAnalysis({ dataStore, providerClient, memoryCache, templateDir
     }
     let auditResultWrite = { status: 'saved', savedRows: storableResults.length };
     if (storableResults.length !== results.length) auditResultWrite = { status: 'failed', savedRows: 0, message: 'The Markdown reports were generated, but one or more scores could not be read, so no audit rows were saved.' };
-    else { try { await dataStore.appendAuditResults(storableResults.map(result => pipeline.auditResultRowFromMarkdown(result, prepared.parameter, timestamp))); } catch (error) { console.error('Audit result storage failed:', error.message); auditResultWrite = { status: 'failed', savedRows: 0, message: 'Reports were generated, but the audit results were not saved to the database.' }; } }
-    responseBody = { mode: input.mode, items, report: items.filter(item => item.markdown).map(item => item.markdown).join('\n\n---\n\n'), partial: items.some(item => item.status === 'failed') || auditResultWrite.status === 'failed', auditResultWrite, cached: false };
-    if (!responseBody.partial) await cacheSet(dataStore, memoryCache, prepared.cacheKey, responseBody, cacheTtlMs);
+    else { try { await dataStore.appendAuditResults(storableResults.map(result => pipeline.auditResultRowFromMarkdown(result, prepared.parameter, timestamp)), { ownerUserId: user.id, ownerEmail: user.email, jobId, files: storableResults.map(result => audioFiles.find(file => file.name === result.fileName) || { name: result.fileName }), companyName: user.companyName, parameter: prepared.parameter, products: prepared.products, model: actualModel }); } catch (error) { console.error('Audit result storage failed:', error.message); auditResultWrite = { status: 'failed', savedRows: 0, message: 'Reports were generated, but the audit results were not saved to the database.' }; } }
+    responseBody = { mode: input.mode, items, report: items.filter(item => item.markdown).map(item => item.markdown).join('\n\n---\n\n'), partial: items.some(item => item.status === 'failed') || auditResultWrite.status === 'failed', auditResultWrite, cached: false, model: actualModel };
   } else {
     const prompt = input.mode === 'voice' ? voicePrompt(user.companyName, prepared.products, audioFiles.length) : coachingPrompt(user.companyName, prepared.rubric, prepared.products, audioFiles.length);
     const schema = input.mode === 'voice' ? pipeline.VOICE_SCHEMA : pipeline.COACHING_SCHEMA; const template = prepared.templates[input.mode];
-    const structured = await providerClient.callStructured(input.provider, prepared.apiKey, audioFiles, prompt, schema);
+    const providerResult = providerClient.callStructuredWithMeta ? await providerClient.callStructuredWithMeta(input.provider, prepared.apiKey, audioFiles, prompt, schema) : { value: await providerClient.callStructured(input.provider, prepared.apiKey, audioFiles, prompt, schema), model: '' };
+    const structured = providerResult.value; actualModel = providerResult.model || '';
     const markdown = input.mode === 'voice' ? pipeline.renderVoice(template, pipeline.validateVoiceResult(structured), audioFiles.length) : pipeline.renderCoaching(template, pipeline.validateCoachingResult(structured), user.companyName);
-    responseBody = { mode: input.mode, items: [{ kind: input.mode, status: 'success', markdown }], report: markdown, partial: false, auditResultWrite: { status: 'not_applicable', savedRows: 0 }, cached: false };
-    await cacheSet(dataStore, memoryCache, prepared.cacheKey, responseBody, cacheTtlMs);
+    responseBody = { mode: input.mode, items: [{ kind: input.mode, status: 'success', markdown }], report: markdown, partial: false, auditResultWrite: { status: 'not_applicable', savedRows: 0 }, cached: false, model: actualModel };
   }
+  if (dataStore.saveReportRun) {
+    try {
+      const successfulCalls = responseBody.items.filter(item => item.kind === 'call' && item.status === 'success');
+      const saved = await dataStore.saveReportRun({ jobId, ownerUserId: user.id, ownerEmail: user.email, ownerName: user.username || user.name, mode: input.mode, provider: input.provider, model: actualModel, companySnapshot: user.companyName, parameterSnapshot: prepared.parameter, productSnapshot: prepared.products, rubricSnapshot: prepared.rubric ? { name: prepared.rubric.name, maximum: prepared.rubric.maximum, source: prepared.rubric.source } : null, files: audioFiles.map(file => ({ name: file.name, sha256: file.sha256, mimeType: file.mimeType, size: file.size })), items: responseBody.items, report: responseBody.report, partial: responseBody.partial, cached: false, ceCount: successfulCalls.filter(item => item.ce).length, minimumScore: successfulCalls.length ? Math.min(...successfulCalls.map(item => Number(item.score) || 0)) : null, maximumScore: successfulCalls.length ? Math.max(...successfulCalls.map(item => Number(item.score) || 0)) : null, searchText: `${user.email} ${user.username || user.name} ${prepared.parameter} ${audioFiles.map(file => file.name).join(' ')} ${responseBody.report}`.slice(0, 16000), completedAt: new Date() });
+      responseBody.reportRunId = saved.id;
+    } catch (error) { console.error('Report history storage failed:', error.message); responseBody.historyWarning = 'The report was generated but could not be added to report history.'; responseBody.partial = true; }
+  }
+  if (!responseBody.partial) await cacheSet(dataStore, memoryCache, prepared.cacheKey, responseBody, cacheTtlMs);
   await dataStore.incrementUsage(user.email).catch(error => console.error('Usage update failed:', error.message));
   return responseBody;
 }
@@ -384,7 +418,7 @@ function createAnalysisQueue({ dataStore, handler, minStartIntervalMs = envNumbe
     if (!job) { if (dataStore.releaseWorkerLease) await dataStore.releaseWorkerLease(workerId); return schedule(); }
     running = true;
     try {
-      const rateKey = job.provider || 'gemini'; const state = await dataStore.getRateState(rateKey); const delay = Math.max(0, new Date(state?.nextAllowedAt || 0).getTime() - Date.now());
+      const rateKey = job.rateKey || job.provider || 'gemini'; const state = await dataStore.getRateState(rateKey); const delay = Math.max(0, new Date(state?.nextAllowedAt || 0).getTime() - Date.now());
       if (delay) await new Promise(resolve => setTimeout(resolve, delay));
       await dataStore.setNextAllowedAt(new Date(Date.now() + minStartIntervalMs), rateKey);
       const audioFiles = await dataStore.loadJobAudio(job);
@@ -392,7 +426,7 @@ function createAnalysisQueue({ dataStore, handler, minStartIntervalMs = envNumbe
       await dataStore.completeJob(job.jobId, result);
     } catch (error) {
       const safe = safeProviderFailure(error);
-      if (safe.errorCode === 'rate_limited') await dataStore.setCooldownUntil(new Date(Date.now() + Math.max(cooldownMs, safe.retryAfterMs || 0)), job.provider || 'gemini').catch(() => {});
+      if (safe.errorCode === 'rate_limited') await dataStore.setCooldownUntil(new Date(Date.now() + Math.max(cooldownMs, safe.retryAfterMs || 0)), job.rateKey || job.provider || 'gemini').catch(() => {});
       await dataStore.failJob(job.jobId, safe);
       console.error(`Analysis job ${job.jobId} failed:`, error.message);
     } finally { if (dataStore.releaseWorkerLease) await dataStore.releaseWorkerLease(workerId).catch(() => {}); running = false; schedule(0); }
@@ -408,47 +442,99 @@ function createApp(options = {}) {
   const app = express(); const dataStore = options.dataStore || createMongoStore(); const providerClient = options.providerClient || createProviderClient(); const sessions = options.sessions || createSessionManager(); const memoryCache = options.analysisCache || createAnalysisCache(); const templateDir = options.templateDir || TEMPLATE_DIR;
   const cacheTtlMs = options.cacheTtlMs || envNumber('AI_CACHE_TTL_MS', 6 * 60 * 60 * 1000); const queueEnabled = options.queueEnabled ?? Boolean(dataStore.createAnalysisJob);
   const allowedOrigins = options.allowedOrigins || envList('PUBLIC_ORIGINS', process.env.PUBLIC_ORIGIN ? [process.env.PUBLIC_ORIGIN] : []); const secureCookies = options.secureCookies ?? (process.env.COOKIE_SECURE === undefined ? process.env.NODE_ENV === 'production' : String(process.env.COOKIE_SECURE).toLowerCase() === 'true');
-  const queue = queueEnabled ? createAnalysisQueue({ dataStore, handler: async (job, audioFiles) => { const user = await dataStore.findByEmail(job.ownerEmail); if (!user) throw Object.assign(new Error('The analysis user no longer exists.'), { errorCode: 'request_rejected', retryable: false }); return runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, job.request, audioFiles); }, ...(options.queueOptions || {}) }) : null;
+  const setupToken = String(options.setupToken ?? process.env.SETUP_TOKEN ?? '');
+  const queue = queueEnabled ? createAnalysisQueue({ dataStore, handler: async (job, audioFiles) => { const user = await dataStore.findByEmail(job.ownerEmail, { includeSecrets: true }); if (!user || user.active === false || user.status === 'inactive') throw Object.assign(new Error('The analysis user is inactive or no longer exists.'), { errorCode: 'account_inactive', retryable: false }); return runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, job.request, audioFiles, { jobId: job.jobId }); }, ...(options.queueOptions || {}) }) : null;
   if (queue) queue.start().catch(error => console.error('Analysis queue startup failed:', error.message));
-  app.disable('x-powered-by'); app.set('trust proxy', options.trustProxy ?? (process.env.NODE_ENV === 'production' ? 1 : false)); app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false })); app.use((req, res, next) => { const token = parseCookies(req.headers.cookie).qa_session; req.sessionToken = token; req.session = token ? sessions.get(token) : null; next(); });
-  const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many login attempts. Try again later.' } }); const requireAuth = (req, res, next) => req.session ? next() : res.status(401).json({ error: 'Authentication required.' }); const requireSameOrigin = (req, res, next) => isSameOrigin(req, allowedOrigins) ? next() : res.status(403).json({ error: 'Invalid request origin.' }); const jsonSmall = express.json({ limit: '20kb' });
+  async function createSession(user, activeParameter) { return dataStore.createSession ? dataStore.createSession(user, activeParameter, SESSION_TTL_MS) : sessions.create(user.email, activeParameter); }
+  async function destroySession(token) { return dataStore.destroySession ? dataStore.destroySession(token) : sessions.destroy(token); }
+  async function setActiveParameter(token, parameter) { return dataStore.setSessionParameter ? dataStore.setSessionParameter(token, parameter) : sessions.setParameter(token, parameter); }
+  app.disable('x-powered-by'); app.set('trust proxy', options.trustProxy ?? (process.env.NODE_ENV === 'production' ? 1 : false)); app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false })); app.use(async (req, res, next) => {
+    try { const token = parseCookies(req.headers.cookie).qa_session; req.sessionToken = token; req.session = token ? (dataStore.getSession ? await dataStore.getSession(token) : sessions.get(token)) : null; req.currentUser = req.session ? await dataStore.findByEmail(req.session.email) : null; if (req.session && (!req.currentUser || req.currentUser.active === false || req.currentUser.status === 'inactive')) { await destroySession(token); req.session = null; req.currentUser = null; clearSessionCookie(res, secureCookies); } next(); }
+    catch (error) { console.error('Session middleware failed:', error.message); res.status(503).json({ error: 'Authentication service is temporarily unavailable.' }); }
+  });
+  const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many login attempts. Try again later.' } }); const requireAuth = (req, res, next) => req.session && req.currentUser ? next() : res.status(401).json({ error: 'Authentication required.' }); const requireReady = (req, res, next) => req.currentUser?.mustChangePassword ? res.status(428).json({ error: 'Change your temporary password before continuing.', errorCode: 'password_change_required' }) : next(); const requireAdmin = (req, res, next) => req.currentUser?.role === 'admin' ? next() : res.status(403).json({ error: 'Administrator access is required.' }); const requireSameOrigin = (req, res, next) => isSameOrigin(req, allowedOrigins) ? next() : res.status(403).json({ error: 'Invalid request origin.' }); const jsonSmall = express.json({ limit: '20kb' }); const jsonAdmin = express.json({ limit: '500kb' });
   app.get('/healthz', async (req, res) => { try { if (dataStore.ping) await dataStore.ping(); return res.json({ ok: true, database: 'mongodb' }); } catch (error) { return res.status(503).json({ ok: false, database: 'unavailable' }); } });
-  app.post('/api/login', loginLimiter, requireSameOrigin, jsonSmall, async (req, res) => { const email = normalizeEmail(req.body?.email); const password = String(req.body?.password || ''); if (!email || !password || email.length > 320 || password.length > 512) return res.status(401).json({ error: 'Invalid email or password.' }); try { const user = await dataStore.findByEmail(email); if (!user || !safeEqual(user.password, password)) return res.status(401).json({ error: 'Invalid email or password.' }); const token = sessions.create(user.email, user.defaultParameter || 'Outbound'); setSessionCookie(res, token, secureCookies); return res.json({ user: publicUser(user) }); } catch (error) { console.error('Login lookup failed:', error.message); return res.status(503).json({ error: 'Authentication service is temporarily unavailable.' }); } });
-  app.get('/api/session', requireAuth, async (req, res) => { try { const user = await dataStore.findByEmail(req.session.email); if (!user) { sessions.destroy(req.sessionToken); clearSessionCookie(res, secureCookies); return res.status(401).json({ error: 'Session is no longer valid.' }); } return res.json({ user: publicUser(user) }); } catch (error) { console.error('Session lookup failed:', error.message); return res.status(503).json({ error: 'Authentication service is temporarily unavailable.' }); } });
-  app.get('/api/audit-config', requireAuth, async (req, res) => { try { const [configuration, user] = await Promise.all([dataStore.getAuditConfiguration(), dataStore.findByEmail(req.session.email)]); if (!user) return res.status(401).json({ error: 'Session is no longer valid.' }); const saved = configuration.parameters.includes(user.defaultParameter) ? user.defaultParameter : configuration.parameters[0]; const active = configuration.parameters.includes(req.session.activeParameter) ? req.session.activeParameter : saved; sessions.setParameter(req.sessionToken, active); return res.json({ products: configuration.products, parameters: configuration.parameters, savedDefaultParameter: saved, activeParameter: active }); } catch (error) { console.error('Audit configuration lookup failed:', error.message); return res.status(503).json({ error: 'Audit configuration is temporarily unavailable.' }); } });
+  app.get('/api/setup/status', async (req, res) => { try { return res.json({ required: dataStore.hasUsers ? !await dataStore.hasUsers() : false }); } catch { return res.status(503).json({ error: 'Setup status is unavailable.' }); } });
+  app.post('/api/setup', requireSameOrigin, jsonSmall, async (req, res) => { try { if (!setupToken || !safeEqual(req.body?.setupToken, setupToken)) return res.status(403).json({ error: 'Invalid setup token.' }); if (!dataStore.createFirstAdmin) return res.status(409).json({ error: 'Setup is unavailable.' }); const user = await dataStore.createFirstAdmin({ email: validateEmail(req.body?.email), username: validateUsername(req.body?.username), password: String(req.body?.password || ''), initialCompanyName: cleanText(req.body?.companyName, 160) || 'QA Auditor' }); return res.status(201).json({ user: publicUser(user) }); } catch (error) { return res.status(error.code === 11000 ? 409 : error.statusCode || 400).json({ error: error.code === 11000 ? 'That email or username is already in use.' : error.message }); } });
+  app.post('/api/login', loginLimiter, requireSameOrigin, jsonSmall, async (req, res) => { const email = normalizeEmail(req.body?.email); const password = String(req.body?.password || ''); if (!email || !password || email.length > 320 || password.length > 512) return res.status(401).json({ error: 'Invalid email or password.' }); try { const user = await dataStore.findByEmail(email); const valid = user && (dataStore.verifyUserPassword ? await dataStore.verifyUserPassword(user, password) : safeEqual(user.password, password)); if (!valid) return res.status(401).json({ error: 'Invalid email or password.' }); if (user.active === false || user.status === 'inactive') return res.status(403).json({ error: 'This account is inactive.' }); const token = await createSession(user, user.defaultParameter || 'Outbound'); setSessionCookie(res, token, secureCookies); return res.json({ user: publicUser(user) }); } catch (error) { console.error('Login lookup failed:', error.message); return res.status(503).json({ error: 'Authentication service is temporarily unavailable.' }); } });
+  app.get('/api/session', requireAuth, (req, res) => res.json({ user: publicUser(req.currentUser) }));
+  app.get('/api/audit-config', requireAuth, requireReady, async (req, res) => { try { const configuration = await dataStore.getAuditConfiguration(); const user = req.currentUser; const saved = configuration.parameters.includes(user.defaultParameter) ? user.defaultParameter : configuration.parameters[0] || ''; const active = configuration.parameters.includes(req.session.activeParameter) ? req.session.activeParameter : saved; await setActiveParameter(req.sessionToken, active); return res.json({ products: configuration.products, parameters: configuration.parameters, savedDefaultParameter: saved, activeParameter: active }); } catch (error) { console.error('Audit configuration lookup failed:', error.message); return res.status(503).json({ error: 'Audit configuration is temporarily unavailable.' }); } });
   async function validateParameter(req, res) { const parameter = String(req.body?.parameter || '').trim(); if (!parameter) { res.status(400).json({ error: 'Choose a QA parameter.' }); return null; } const entry = await dataStore.getQaParameter(parameter); if (!entry) { res.status(400).json({ error: 'The selected QA parameter is no longer available.' }); return null; } return entry.name; }
-  app.put('/api/session/parameter', requireSameOrigin, requireAuth, jsonSmall, async (req, res) => { try { const parameter = await validateParameter(req, res); if (!parameter) return; sessions.setParameter(req.sessionToken, parameter); return res.json({ activeParameter: parameter }); } catch (error) { console.error('Parameter selection failed:', error.message); return res.status(503).json({ error: 'The parameter could not be updated.' }); } });
-  app.put('/api/user/default-parameter', requireSameOrigin, requireAuth, jsonSmall, async (req, res) => { try { const parameter = await validateParameter(req, res); if (!parameter) return; await dataStore.saveDefaultParameter(req.session.email, parameter); sessions.setParameter(req.sessionToken, parameter); return res.json({ savedDefaultParameter: parameter, activeParameter: parameter }); } catch (error) { console.error('Default parameter update failed:', error.message); return res.status(503).json({ error: 'The default parameter could not be saved.' }); } });
-  app.post('/api/logout', requireSameOrigin, (req, res) => { if (req.sessionToken) sessions.destroy(req.sessionToken); clearSessionCookie(res, secureCookies); res.json({ ok: true }); });
+  app.put('/api/session/parameter', requireSameOrigin, requireAuth, requireReady, jsonSmall, async (req, res) => { try { const parameter = await validateParameter(req, res); if (!parameter) return; await setActiveParameter(req.sessionToken, parameter); return res.json({ activeParameter: parameter }); } catch (error) { console.error('Parameter selection failed:', error.message); return res.status(503).json({ error: 'The parameter could not be updated.' }); } });
+  app.put('/api/user/default-parameter', requireSameOrigin, requireAuth, requireReady, jsonSmall, async (req, res) => { try { const parameter = await validateParameter(req, res); if (!parameter) return; await dataStore.saveDefaultParameter(req.session.email, parameter); await setActiveParameter(req.sessionToken, parameter); return res.json({ savedDefaultParameter: parameter, activeParameter: parameter }); } catch (error) { console.error('Default parameter update failed:', error.message); return res.status(503).json({ error: 'The default parameter could not be saved.' }); } });
+  app.post('/api/logout', requireSameOrigin, async (req, res) => { if (req.sessionToken) await destroySession(req.sessionToken); clearSessionCookie(res, secureCookies); res.json({ ok: true }); });
 
-  app.post('/api/analyze', requireSameOrigin, requireAuth, express.json({ limit: Infinity }), async (req, res) => {
+  app.put('/api/account/password', requireSameOrigin, requireAuth, jsonSmall, async (req, res) => {
+    try { const valid = dataStore.verifyUserPassword ? await dataStore.verifyUserPassword(req.currentUser, String(req.body?.currentPassword || '')) : safeEqual(req.currentUser.password, req.body?.currentPassword); if (!valid) return res.status(400).json({ error: 'Current password is incorrect.' }); if (!dataStore.changePassword) return res.status(501).json({ error: 'Password management is unavailable.' }); await dataStore.changePassword(req.currentUser.id || req.currentUser._id, String(req.body?.newPassword || ''), false); clearSessionCookie(res, secureCookies); return res.json({ ok: true, loginRequired: true }); }
+    catch (error) { return res.status(error.statusCode || 400).json({ error: error.message }); }
+  });
+  app.get('/api/account/api-keys', requireAuth, requireReady, (req, res) => res.json({ apiKeys: req.currentUser.apiKeyStatus || {} }));
+  app.get('/api/account/api-keys/:provider', requireAuth, requireReady, (req, res) => { const provider = String(req.params.provider || '').toLowerCase(); if (!['gemini', 'openai'].includes(provider)) return res.status(400).json({ error: 'Unsupported provider.' }); return res.json({ apiKey: req.currentUser.apiKeyStatus?.[provider] || { configured: false } }); });
+  async function validateProviderKey(provider, key) {
+    if (options.apiKeyValidator) return options.apiKeyValidator(provider, key);
+    const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 10000);
+    try { const response = provider === 'gemini' ? await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key }, signal: controller.signal }) : await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` }, signal: controller.signal }); if (response.status === 401 || response.status === 403) return { valid: false, status: 'invalid' }; return { valid: response.ok ? true : null, status: response.ok ? 'verified' : 'unverified' }; }
+    catch { return { valid: null, status: 'unverified' }; } finally { clearTimeout(timeout); }
+  }
+  app.put('/api/account/api-keys/:provider', requireSameOrigin, requireAuth, requireReady, jsonSmall, async (req, res) => {
+    const provider = String(req.params.provider || '').toLowerCase(); const apiKey = String(req.body?.apiKey || '').trim(); if (!['gemini', 'openai'].includes(provider) || !apiKey || apiKey.length > 512) return res.status(400).json({ error: 'Enter a valid provider API key.' });
+    try { const validation = await validateProviderKey(provider, apiKey); if (validation.valid === false) return res.status(400).json({ error: 'The provider rejected this API key.' }); const value = await dataStore.setApiKey(req.currentUser.id || req.currentUser._id, provider, apiKey, validation.status); return res.json({ apiKey: value, warning: validation.status === 'unverified' ? 'The key was encrypted and saved, but the provider could not verify it right now.' : '' }); }
+    catch (error) { return res.status(400).json({ error: error.message }); }
+  });
+  app.delete('/api/account/api-keys/:provider', requireSameOrigin, requireAuth, requireReady, async (req, res) => { const provider = String(req.params.provider || '').toLowerCase(); if (!['gemini', 'openai'].includes(provider)) return res.status(400).json({ error: 'Unsupported provider.' }); await dataStore.deleteApiKey(req.currentUser.id || req.currentUser._id, provider); return res.json({ ok: true }); });
+
+  app.get('/api/reports', requireAuth, requireReady, async (req, res) => { try { return res.json(await dataStore.listReports(req.currentUser, req.query)); } catch (error) { console.error('Report history lookup failed:', error.message); return res.status(503).json({ error: 'Report history is temporarily unavailable.' }); } });
+  app.get('/api/reports/:id', requireAuth, requireReady, async (req, res) => { try { const report = await dataStore.getReport(req.currentUser, req.params.id); return report ? res.json({ report }) : res.status(404).json({ error: 'Report was not found.' }); } catch { return res.status(503).json({ error: 'The report is temporarily unavailable.' }); } });
+
+  app.get('/api/admin/users', requireAuth, requireReady, requireAdmin, async (req, res) => res.json({ users: (await dataStore.listUsers()).map(publicUser) }));
+  app.post('/api/admin/users', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res) => { try { const user = await dataStore.createUser({ email: validateEmail(req.body?.email), username: validateUsername(req.body?.username), password: String(req.body?.password || '') }); return res.status(201).json({ user: publicUser(user) }); } catch (error) { return res.status(error.code === 11000 ? 409 : error.statusCode || 400).json({ error: error.code === 11000 ? 'That email or username is already in use.' : error.message }); } });
+  app.put('/api/admin/users/:id/role', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res) => { const role = req.body?.role === 'admin' ? 'admin' : req.body?.role === 'user' ? 'user' : ''; if (!role) return res.status(400).json({ error: 'Invalid role.' }); if (String(req.currentUser.id) === String(req.params.id)) return res.status(400).json({ error: 'Ask another administrator to change your role.' }); try { await dataStore.setUserRole(req.params.id, role); return res.json({ ok: true }); } catch (error) { return res.status(400).json({ error: error.message }); } });
+  app.put('/api/admin/users/:id/status', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res) => { const status = req.body?.status === 'active' ? 'active' : req.body?.status === 'inactive' ? 'inactive' : ''; if (!status) return res.status(400).json({ error: 'Invalid account status.' }); if (status === 'inactive' && String(req.currentUser.id) === String(req.params.id)) return res.status(400).json({ error: 'You cannot deactivate your own account.' }); try { await dataStore.setUserStatus(req.params.id, status); return res.json({ ok: true }); } catch (error) { return res.status(400).json({ error: error.message }); } });
+  app.post('/api/admin/users/:id/reset-password', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res) => { if (String(req.currentUser.id) === String(req.params.id)) return res.status(400).json({ error: 'Use account settings to change your own password.' }); try { await dataStore.changePassword(req.params.id, String(req.body?.temporaryPassword || ''), true); return res.json({ ok: true }); } catch (error) { return res.status(400).json({ error: error.message }); } });
+  app.get('/api/admin/company', requireAuth, requireReady, requireAdmin, async (req, res) => res.json(await dataStore.getCompany()));
+  app.put('/api/admin/company', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res) => { const companyName = cleanText(req.body?.companyName, 160); if (companyName.length < 2) return res.status(400).json({ error: 'Company name is required.' }); return res.json(await dataStore.updateCompany(companyName)); });
+  app.get('/api/admin/product-briefs', requireAuth, requireReady, requireAdmin, async (req, res) => res.json({ items: await dataStore.listProductBriefs() }));
+  app.post('/api/admin/product-briefs', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonAdmin, async (req, res) => { const input = { category: cleanText(req.body?.category, 200), subCategory: cleanText(req.body?.subCategory, 300), brief: cleanText(req.body?.brief, 30000) }; if (!input.category || !input.subCategory || !input.brief) return res.status(400).json({ error: 'Category, sub-category, and product brief are required.' }); try { return res.status(201).json({ item: await dataStore.createProductBrief(input) }); } catch (error) { return res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'That category and sub-category already exist.' : error.message }); } });
+  app.put('/api/admin/product-briefs/:id', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonAdmin, async (req, res) => { const fields = {}; for (const key of ['category', 'subCategory', 'brief']) if (req.body?.[key] !== undefined) fields[key] = cleanText(req.body[key], key === 'brief' ? 30000 : 300); if (req.body?.archived !== undefined) fields.archived = Boolean(req.body.archived); if (Object.values(fields).some(value => typeof value === 'string' && !value)) return res.status(400).json({ error: 'Product fields cannot be empty.' }); try { await dataStore.updateProductBrief(req.params.id, fields); return res.json({ ok: true }); } catch (error) { return res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'That category and sub-category already exist.' : error.message }); } });
+  app.get('/api/admin/scorecards', requireAuth, requireReady, requireAdmin, async (req, res) => res.json({ items: await dataStore.listScorecards() }));
+  app.post('/api/admin/scorecards', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonAdmin, async (req, res) => { try { return res.status(201).json({ item: await dataStore.createScorecard(scorecardDocument(req.body)) }); } catch (error) { return res.status(error.code === 11000 ? 409 : error.statusCode || 400).json({ error: error.code === 11000 ? 'That scorecard name already exists.' : error.message }); } });
+  app.put('/api/admin/scorecards/:id', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonAdmin, async (req, res) => { try { if (req.body?.archived !== undefined && !req.body?.definition) await dataStore.updateScorecard(req.params.id, { archived: Boolean(req.body.archived) }); else await dataStore.updateScorecard(req.params.id, scorecardDocument(req.body)); return res.json({ ok: true }); } catch (error) { return res.status(error.code === 11000 ? 409 : error.statusCode || 400).json({ error: error.code === 11000 ? 'That scorecard name already exists.' : error.message }); } });
+
+  app.post('/api/analyze', requireSameOrigin, requireAuth, requireReady, express.json({ limit: Infinity }), async (req, res) => {
     let input; let audioFiles;
     try { input = normalizeAnalysisInput(req.body); audioFiles = validateAudioFiles(req.body?.audioFiles); }
     catch (error) { return res.status(error.statusCode || 400).json({ error: error.message }); }
     try {
-      const user = await dataStore.findByEmail(req.session.email); if (!user) return res.status(401).json({ error: 'Session is no longer valid.' });
+      const user = await dataStore.findByEmail(req.session.email, { includeSecrets: true }); if (!user || user.active === false || user.status === 'inactive') return res.status(401).json({ error: 'Session is no longer valid.' });
       const prepared = await prepareAnalysis(dataStore, user, input, audioFiles, templateDir);
-      if (input.mode !== 'voice') sessions.setParameter(req.sessionToken, prepared.parameter);
+      if (input.mode !== 'voice') await setActiveParameter(req.sessionToken, prepared.parameter);
       const cached = await cacheGet(dataStore, memoryCache, prepared.cacheKey);
       if (cached) return res.json({ ...cached, cached: true, auditResultWrite: input.mode === 'single' ? { status: 'cached', savedRows: 0 } : cached.auditResultWrite });
-      if (!queue) return res.json(await runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, input, audioFiles));
+      if (!queue) return res.json(await runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, input, audioFiles, { jobId: crypto.randomUUID() }));
       const dedupeKey = analysisDedupeKey(user.email, input, audioFiles); const active = await dataStore.findActiveJob(user.email, dedupeKey);
       if (active) return res.status(202).json({ jobId: active.jobId, status: active.status, deduplicated: true });
-      const jobId = crypto.randomUUID(); await dataStore.createAnalysisJob({ jobId, ownerEmail: user.email, provider: input.provider, mode: input.mode, dedupeKey, cacheKey: prepared.cacheKey, request: input, attempts: 0 }, audioFiles); queue.wake();
+      const primaryModel = input.provider === 'gemini' ? envList('GEMINI_MODELS', DEFAULT_GEMINI_MODELS)[0] : envList('OPENAI_MODELS', DEFAULT_OPENAI_MODELS)[0];
+      const jobId = crypto.randomUUID(); await dataStore.createAnalysisJob({ jobId, ownerUserId: user.id, ownerEmail: user.email, provider: input.provider, rateKey: `${input.provider}:${user.apiKeyFingerprints?.[input.provider] || user.id}:${primaryModel}`, mode: input.mode, dedupeKey, cacheKey: prepared.cacheKey, request: input, attempts: 0 }, audioFiles); queue.wake();
       return res.status(202).json({ jobId, status: 'queued', position: 1, deduplicated: false });
     } catch (error) { console.error('Analysis submission failed:', error.message); if (error.statusCode) return res.status(error.statusCode).json({ error: error.message }); if (/rubric|template|placeholder/i.test(error.message)) return res.status(503).json({ error: error.message, errorCode: 'configuration_error', retryable: false }); return res.status(502).json(safeProviderFailure(error)); }
   });
 
-  app.get('/api/analysis-jobs/:jobId', requireAuth, async (req, res) => {
+  app.get('/api/analysis-jobs/:jobId', requireAuth, requireReady, async (req, res) => {
     if (!queue) return res.status(404).json({ error: 'Queued analysis is unavailable.' });
     try { const job = await dataStore.getJob(req.session.email, String(req.params.jobId || '')); if (!job) return res.status(404).json({ error: 'Analysis job was not found.' }); if (job.status === 'complete') return res.json({ jobId: job.jobId, status: job.status, result: job.result }); if (job.status === 'failed') return res.json({ jobId: job.jobId, status: job.status, error: job.error }); return res.json({ jobId: job.jobId, status: job.status, position: job.position || 0, createdAt: job.createdAt, startedAt: job.startedAt }); }
     catch (error) { console.error('Analysis job lookup failed:', error.message); return res.status(503).json({ error: 'Analysis status is temporarily unavailable.' }); }
   });
 
-  if (fs.existsSync(DIST_INDEX_PATH)) { app.use('/assets', express.static(path.join(DIST_DIR, 'assets'), { index: false })); app.get('/favicon.svg', (req, res) => res.sendFile(path.join(DIST_DIR, 'favicon.svg'))); app.get('/', (req, res) => res.sendFile(DIST_INDEX_PATH)); }
-  else app.get(['/', '/10ms-qa-audit-portal.html'], (req, res) => res.sendFile(INDEX_PATH));
+  if (fs.existsSync(DIST_INDEX_PATH)) { app.use('/assets', express.static(path.join(DIST_DIR, 'assets'), { index: false })); app.get('/favicon.svg', (req, res) => res.sendFile(path.join(DIST_DIR, 'favicon.svg'))); app.get(['/', '/setup'], (req, res) => res.sendFile(DIST_INDEX_PATH)); }
+  else app.get(['/', '/setup', '/10ms-qa-audit-portal.html'], (req, res) => res.sendFile(INDEX_PATH));
   app.use((req, res) => res.status(404).json({ error: 'Not found.' })); return app;
 }
 
-if (require.main === module) { require('dotenv').config(); const port = envNumber('PORT', 3000); createApp().listen(port, () => console.log(`QA Auditor listening on port ${port}`)); }
+if (require.main === module) {
+  require('dotenv').config();
+  (async () => {
+    const port = envNumber('PORT', 3000); const dataStore = createMongoStore(); await dataStore.initialize();
+    createApp({ dataStore }).listen(port, () => console.log(`QA Auditor listening on port ${port}`));
+  })().catch(error => { console.error(`Startup failed: ${error.message}`); process.exit(1); });
+}
 module.exports = { createApp, createMongoStore, createProviderClient, createSessionManager, createAnalysisCache, createAnalysisQueue, normalizeAnalysisInput, normalizeEmail, qaPrompt, qaMarkdownPrompt, parseQaRubric: pipeline.parseQaRubric };

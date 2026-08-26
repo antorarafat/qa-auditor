@@ -11,6 +11,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      DEPLOYMENT_NAMESPACE: ${DEPLOYMENT_NAMESPACE:-development}
       AI_CACHE_TTL_MS: 21600000
       AI_CACHE_MAX_ENTRIES: 100
     read_only: true

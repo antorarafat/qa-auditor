@@ -1,47 +1,118 @@
-# 10MS QA Auditor
+# QA Auditor
 
-The portal runs through a Node backend and MongoDB. The five primary collections preserve the original business datasets:
+A secure multi-user call-audit portal with QA Scorecard, Customer Voice, and Advisor Coaching reports. It uses personal Gemini or OpenAI keys, MongoDB-backed sessions and queues, durable report history, and live product/scorecard configuration.
 
-- `user`: authentication, provider keys, usage, and default QA parameter
-- `company`: global company name
-- `product_brief`: searchable category/sub-category product facts
-- `qa_scorecard`: live parameters, weighted rubric rows, and critical-error rules
-- `audit_result`: append-only QA report history
+The application does not ship with company data, scorecards, API keys, passwords, recordings, or reports.
 
-MongoDB also stores `analysis_jobs`, `analysis_cache`, `rate_limit_state`, and GridFS `audio_files` data. These support persistent queued work, duplicate-request coalescing, six-hour result caching, and controlled Gemini request spacing without changing report content.
+## Stored data
 
-QA Scorecard evaluates uploaded calls and renders one report per successful call plus a server-generated run summary. Customer Voice and Advisor Coaching remain summary-only. Gemini starts with `gemini-3.6-flash` and uses the configured fallback order only when a model cannot serve the request. Report layouts are loaded from `templates/` on every run.
+- `user`: roles, Argon2id password hashes, and AES-256-GCM encrypted personal API keys
+- `sessions`: hashed browser sessions with automatic expiry
+- `company`, `product_brief`, and `qa_scorecard`: current configuration
+- `report_runs`: complete history for all three modes
+- `audit_result`: compatible QA columns plus ownership, job, file, and snapshot metadata
+- `analysis_jobs`, `analysis_cache`, `rate_limit_state`, and GridFS `audio_files`: reliable queued analysis
 
-## Local setup
+## First installation with Docker
 
-1. Copy `.env.example` to `.env`.
-2. Set `MONGODB_URI`, `MONGODB_DATABASE`, and `SESSION_SECRET`.
-3. Install and start:
+Requirements: Docker Compose and MongoDB. Use MongoDB TLS whenever it is reached over the internet.
+
+1. Copy the environment template: `cp .env.example .env`.
+2. Generate three independent secrets:
+
+   ```sh
+   openssl rand -base64 48   # SESSION_SECRET
+   openssl rand -base64 32   # APP_ENCRYPTION_KEY (exactly 32 decoded bytes)
+   openssl rand -base64 48   # SETUP_TOKEN
+   ```
+
+3. Set `MONGODB_URI`, `MONGODB_DATABASE`, the generated secrets, exact public HTTPS origin, and a unique `DEPLOYMENT_NAMESPACE` in `.env`. A hosted MongoDB URI will commonly include `tls=true`; follow your provider’s instructions.
+4. Run `docker compose up --build -d`.
+5. Open `/setup`. Enter the `SETUP_TOKEN`, first administrator email, username, password, and company name. Setup permanently closes after that administrator is created.
+6. Sign in. Add your personal provider key under **Account security**, then add products and a scorecard under **Admin**.
+
+MongoDB creates the database on its first write. Startup automatically creates collections, validators, indexes, TTL rules, and idempotent migration records.
+
+## Native Node installation
+
+Node.js 20 or newer is required.
 
 ```sh
-npm install
+cp .env.example .env
+npm ci
+npm run build
 npm start
 ```
 
-Open `http://localhost:3000/`.
+Open `http://localhost:3000`. `npm run dev` runs the React development server.
 
-## Docker
+## Product briefs
+
+Open **Admin → Products**. Each entry has a category, sub-category, and factual brief. Entries can be edited and archived. Archived entries disappear from new audits without changing historical snapshots.
+
+Fictional **Northstar Learning** example:
+
+> Category: Professional Programs<br>
+> Sub-category: Data Foundations<br>
+> Brief: Twelve live classes, recordings available for 90 days, and weekday mentor support.
+
+## Scorecards
+
+Open **Admin → Scorecards**. Add a unique parameter name, overall total, categories, weighted rows, and critical-error rules. Weights must be positive; rows must total their category, and categories must total the overall score.
+
+Generic example:
+
+- `Consultation Call` — 100 points
+- Opening — 20: Greeting 10, Permission 10
+- Discovery — 40: Need identification 20, Relevant questions 20
+- Guidance — 40: Accurate recommendation 25, Clear next step 15
+- Critical error: knowingly providing a materially false product fact
+
+Do not put secrets or personal customer data in a scorecard.
+
+## Accounts and access
+
+- Login uses email; username is the unique display name.
+- Administrators create temporary-password users. They must replace that password before continuing.
+- Password changes, resets, role changes, and deactivation revoke sessions.
+- Administrators cannot see or manage another person’s provider keys.
+- At least one active administrator must remain.
+- Users see their own reports. Administrators may filter all reports.
+
+## Queue, cache, and Gemini free tier
+
+- `AI_MIN_START_INTERVAL_MS` spaces requests by API-key fingerprint and primary model.
+- `AI_RATE_LIMIT_COOLDOWN_MS` controls rate-limit cooldown.
+- `AI_CACHE_TTL_MS` controls identical-result reuse. A cache hit reuses the original durable report and creates no duplicate history.
+- `DEPLOYMENT_NAMESPACE` stops different deployments claiming one another’s jobs.
+- QA uses one Gemini request per run and creates the summary locally. Fallback models are used only when required.
+
+Free-tier provider limits still apply. If every configured model is out of quota, the portal returns a clear retryable error without losing queue state.
+
+## Backup, migration, and upgrade
+
+Always inspect and back up before migration:
 
 ```sh
-docker compose up --build -d
+npm run db:migrate:dry-run
+npm run db:backup
+npm run db:migrate
 ```
 
-The local `templates/` directory is mounted read-only at `/app/templates`. Health is available at `/healthz` and includes MongoDB connectivity.
+The backup contains all collections and GridFS objects and is encrypted with `APP_ENCRYPTION_KEY`. Store it away from the server. No plaintext migration export is created.
 
-## Queue and cache
+For upgrades: back up, pull, run the dry-run, rebuild, migrate, then verify `/healthz`, sign-in, provider connectivity, and report access.
 
-- `AI_MIN_START_INTERVAL_MS` controls the minimum interval between Gemini job starts.
-- `AI_RATE_LIMIT_COOLDOWN_MS` controls the minimum global cooldown after a `429`.
-- `AI_WORKER_LEASE_MS` keeps the one-active-request rule global across multiple containers.
-- `AI_CACHE_TTL_MS` controls persistent MongoDB result-cache duration.
-- Jobs and uploaded audio survive browser refreshes and application restarts.
-- Identical active submissions share one job; successful identical runs use the persistent cache.
+### Key-loss warning
 
-## Production
+Losing `APP_ENCRYPTION_KEY` makes saved provider keys and backups encrypted with it unrecoverable. Rotation requires a decrypt-and-re-encrypt migration. Losing `SESSION_SECRET` invalidates browser sessions but not reports. Keep both in a secret manager.
 
-Keep MongoDB credentials, provider API keys, and `SESSION_SECRET` outside Git. Set `NODE_ENV=production`, configure the exact HTTPS origin, and mount `templates/` read-only.
+## Verification
+
+```sh
+npm test
+npm run build
+npm audit
+```
+
+In production use HTTPS, `COOKIE_SECURE=true`, exact `PUBLIC_ORIGIN`/`PUBLIC_ORIGINS`, MongoDB TLS, and a unique production namespace.

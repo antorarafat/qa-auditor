@@ -893,106 +893,281 @@ function CompanyAdmin() {
 }
 
 function ProductsAdmin() {
-  const empty = { category: "", subCategory: "", brief: "" };
+  const emptyBrief = { categoryId: "", subCategoryId: "", brief: "" };
+  const [taxonomy, setTaxonomy] = useState([]);
   const [items, setItems] = useState([]);
-  const [form, setForm] = useState(empty);
+  const [categoryName, setCategoryName] = useState("");
+  const [subCategoryForm, setSubCategoryForm] = useState({
+    categoryId: "",
+    name: "",
+  });
+  const [form, setForm] = useState(emptyBrief);
   const [editId, setEditId] = useState("");
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
+
   async function load() {
-    setItems((await api("/api/admin/product-briefs")).items);
+    const [taxonomyData, briefData] = await Promise.all([
+      api("/api/admin/product-taxonomy"),
+      api("/api/admin/product-briefs"),
+    ]);
+    setTaxonomy(taxonomyData.categories || []);
+    setItems(briefData.items || []);
   }
   useEffect(() => {
     load().catch((error) => setMessage(error.message));
   }, []);
-  async function save(event) {
+
+  const activeCategories = taxonomy.filter((item) => !item.archived);
+  const selectedCategory = taxonomy.find((item) => item.id === form.categoryId);
+  const availableSubCategories = (selectedCategory?.subCategories || []).filter(
+    (item) => !item.archived,
+  );
+
+  async function createCategory(event) {
+    event.preventDefault();
+    try {
+      await api(
+        "/api/admin/product-categories",
+        body("POST", { name: categoryName }),
+      );
+      setCategoryName("");
+      setMessage("Category created. You can now add its sub-categories.");
+      await load();
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function createSubCategory(event) {
+    event.preventDefault();
+    try {
+      await api(
+        "/api/admin/product-subcategories",
+        body("POST", subCategoryForm),
+      );
+      setSubCategoryForm({ categoryId: subCategoryForm.categoryId, name: "" });
+      setMessage(
+        "Sub-category created. It is now available in the description dropdown.",
+      );
+      await load();
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function saveBrief(event) {
     event.preventDefault();
     try {
       if (editId)
         await api(`/api/admin/product-briefs/${editId}`, body("PUT", form));
       else await api("/api/admin/product-briefs", body("POST", form));
-      setForm(empty);
+      setForm(emptyBrief);
       setEditId("");
-      setMessage("Product brief saved.");
-      load();
+      setMessage("Product description saved.");
+      await load();
     } catch (error) {
       setMessage(error.message);
     }
   }
+
   async function archive(item) {
-    await api(
-      `/api/admin/product-briefs/${item.id}`,
-      body("PUT", { archived: !item.archived }),
-    );
-    load();
+    try {
+      await api(
+        `/api/admin/product-briefs/${item.id}`,
+        body("PUT", { archived: !item.archived }),
+      );
+      await load();
+    } catch (error) {
+      setMessage(error.message);
+    }
   }
+
+  function edit(item) {
+    setEditId(item.id);
+    setForm({
+      categoryId: String(item.categoryId || ""),
+      subCategoryId: String(item.subCategoryId || ""),
+      brief: item.brief,
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   const visible = items.filter((item) =>
     `${item.category} ${item.subCategory} ${item.brief}`
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
+
   return (
-    <div className="management-grid two">
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            {editId ? "Edit product brief" : "Add product brief"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form className="stack-form" onSubmit={save}>
-            <Label>Category</Label>
-            <Input
-              required
-              value={form.category}
-              onChange={(e) => setForm({ ...form, category: e.target.value })}
-            />
-            <Label>Sub-category</Label>
-            <Input
-              required
-              value={form.subCategory}
-              onChange={(e) =>
-                setForm({ ...form, subCategory: e.target.value })
-              }
-            />
-            <Label>Factual product brief</Label>
-            <Textarea
-              rows="10"
-              required
-              value={form.brief}
-              onChange={(e) => setForm({ ...form, brief: e.target.value })}
-            />
-            <div className="form-actions">
-              <Button>{editId ? "Update" : "Add product"}</Button>
-              {editId && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => {
-                    setEditId("");
-                    setForm(empty);
-                  }}
-                >
-                  Cancel
+    <div className="product-admin">
+      <div className="management-grid two">
+        <Card>
+          <CardHeader>
+            <div className="step-label">Step 1</div>
+            <CardTitle>Create the catalog structure</CardTitle>
+            <CardDescription>
+              Create a category first, then add one or more sub-categories.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="catalog-setup">
+            <form className="stack-form" onSubmit={createCategory}>
+              <Label>New category</Label>
+              <div className="inline-create">
+                <Input
+                  required
+                  value={categoryName}
+                  onChange={(event) => setCategoryName(event.target.value)}
+                  placeholder="Example: Professional Programs"
+                />
+                <Button>Create category</Button>
+              </div>
+            </form>
+            <form className="stack-form" onSubmit={createSubCategory}>
+              <Label>Category</Label>
+              <Select
+                required
+                value={subCategoryForm.categoryId}
+                onChange={(event) =>
+                  setSubCategoryForm({
+                    ...subCategoryForm,
+                    categoryId: event.target.value,
+                  })
+                }
+              >
+                <option value="">Choose a category</option>
+                {activeCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </Select>
+              <Label>New sub-category</Label>
+              <div className="inline-create">
+                <Input
+                  required
+                  value={subCategoryForm.name}
+                  onChange={(event) =>
+                    setSubCategoryForm({
+                      ...subCategoryForm,
+                      name: event.target.value,
+                    })
+                  }
+                  placeholder="Example: Data Foundations"
+                />
+                <Button disabled={!subCategoryForm.categoryId}>
+                  Create sub-category
                 </Button>
-              )}
+              </div>
+            </form>
+            <div className="taxonomy-preview">
+              {taxonomy.map((category) => (
+                <div key={category.id}>
+                  <strong>{category.name}</strong>
+                  <span>
+                    {category.subCategories
+                      ?.map((item) => item.name)
+                      .join(", ") || "No sub-categories yet"}
+                  </span>
+                </div>
+              ))}
             </div>
-            <Notice
-              message={message}
-              error={/required|exist|could/i.test(message)}
-            />
-          </form>
-        </CardContent>
-      </Card>
-      <Card>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="step-label">Step 2</div>
+            <CardTitle>
+              {editId ? "Edit description" : "Add a description"}
+            </CardTitle>
+            <CardDescription>
+              Select the category and sub-category you created, then add the
+              factual product description.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form className="stack-form" onSubmit={saveBrief}>
+              <Label>Category</Label>
+              <Select
+                required
+                value={form.categoryId}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    categoryId: event.target.value,
+                    subCategoryId: "",
+                  })
+                }
+              >
+                <option value="">Choose a category</option>
+                {activeCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </Select>
+              <Label>Sub-category</Label>
+              <Select
+                required
+                disabled={!form.categoryId}
+                value={form.subCategoryId}
+                onChange={(event) =>
+                  setForm({ ...form, subCategoryId: event.target.value })
+                }
+              >
+                <option value="">Choose a sub-category</option>
+                {availableSubCategories.map((subCategory) => (
+                  <option key={subCategory.id} value={subCategory.id}>
+                    {subCategory.name}
+                  </option>
+                ))}
+              </Select>
+              <Label>Product description</Label>
+              <Textarea
+                rows="9"
+                required
+                value={form.brief}
+                onChange={(event) =>
+                  setForm({ ...form, brief: event.target.value })
+                }
+                placeholder="Add only factual information that the audit may verify."
+              />
+              <div className="form-actions">
+                <Button disabled={!form.categoryId || !form.subCategoryId}>
+                  {editId ? "Update description" : "Save description"}
+                </Button>
+                {editId && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setEditId("");
+                      setForm(emptyBrief);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </div>
+              <Notice
+                message={message}
+                error={/required|exist|valid|could|choose/i.test(message)}
+              />
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="product-description-list">
         <CardHeader>
-          <CardTitle>Product catalog</CardTitle>
+          <CardTitle>Product descriptions</CardTitle>
           <div className="search-field">
             <Search size={16} />
             <Input
-              placeholder="Search products"
+              placeholder="Search descriptions"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(event) => setSearch(event.target.value)}
             />
           </div>
         </CardHeader>
@@ -1008,18 +1183,7 @@ function ProductsAdmin() {
                 </strong>
                 <span>{item.brief}</span>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setEditId(item.id);
-                  setForm({
-                    category: item.category,
-                    subCategory: item.subCategory,
-                    brief: item.brief,
-                  });
-                }}
-              >
+              <Button variant="outline" size="sm" onClick={() => edit(item)}>
                 Edit
               </Button>
               <Button variant="ghost" size="sm" onClick={() => archive(item)}>
@@ -1033,7 +1197,6 @@ function ProductsAdmin() {
     </div>
   );
 }
-
 function ScorecardsAdmin() {
   const newDefinition = () => ({
     name: "",

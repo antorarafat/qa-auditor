@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const request = require('supertest');
-const { createApp, createProviderClient, normalizeAnalysisInput, parseQaRubric, qaPrompt, qaMarkdownPrompt } = require('../server');
+const { createApp, createProviderClient, normalizeAnalysisInput, parseQaRubric, qaPrompt, qaMarkdownPrompt, scorecardForEditor } = require('../server');
 const { loadTemplate, loadAndValidateTemplates, renderTemplate, validateQaResult, renderQaCall, parseQaMarkdownReport, qaSchema } = require('../lib/audit-pipeline');
 
 const RUBRIC = `১. Greetings (৫ নম্বর)\n- Greetings (২)\n- Permission (৩)\n\n২. Closing (৫ নম্বর)\n- Summary (২)\n- Goodbye (৩)\n\nCritical Errors\n- Wrong information\n- Rudeness`;
@@ -588,4 +588,27 @@ test('personal API-key APIs return only masked metadata', async () => {
   const app = createApp({ dataStore: store, providerClient: fakeProviders(), apiKeyValidator: async () => ({ valid: true, status: 'verified' }) }); const agent = request.agent(app); await login(agent);
   const secret = 'personal-provider-key-1234'; const response = await agent.put('/api/account/api-keys/gemini').send({ apiKey: secret });
   assert.equal(response.status, 200); assert.equal(response.body.apiKey.lastFour, '1234'); assert.equal(JSON.stringify(response.body).includes(secret), false);
+});
+
+test('legacy scorecards hydrate every category and row for the structured editor', () => {
+  const item = scorecardForEditor({ id: 'inbound', name: 'Inbound', detail: RUBRIC });
+  assert.equal(item.definition.overallTotal, 10);
+  assert.deepEqual(item.definition.categories.map(category => category.name), ['Greetings', 'Closing']);
+  assert.deepEqual(item.definition.categories[0].rows, [{ name: 'Greetings', weight: 2 }, { name: 'Permission', weight: 3 }]);
+  assert.deepEqual(item.definition.criticalErrors, ['Wrong information', 'Rudeness']);
+});
+
+test('admin product APIs create hierarchy before accepting a description', async () => {
+  const store = fakeStore(); store.users[0].role = 'admin'; store.users[0].id = 'admin-user';
+  store.listProductTaxonomy = async () => [{ id: 'category-1', name: 'Programs', archived: false, subCategories: [{ id: 'subcategory-1', name: 'Data', archived: false }] }];
+  store.createProductCategory = async name => ({ id: 'category-1', name });
+  store.createProductSubCategory = async (categoryId, name) => ({ id: 'subcategory-1', categoryId, name });
+  store.listProductBriefs = async () => [];
+  store.createProductBrief = async input => ({ id: 'brief-1', category: 'Programs', subCategory: 'Data', ...input });
+  const app = createApp({ dataStore: store, providerClient: fakeProviders() }); const agent = request.agent(app); await login(agent);
+  assert.equal((await agent.get('/api/admin/product-taxonomy')).status, 200);
+  assert.equal((await agent.post('/api/admin/product-categories').send({ name: 'Programs' })).status, 201);
+  assert.equal((await agent.post('/api/admin/product-subcategories').send({ categoryId: 'category-1', name: 'Data' })).status, 201);
+  assert.equal((await agent.post('/api/admin/product-briefs').send({ brief: 'Facts only' })).status, 400);
+  assert.equal((await agent.post('/api/admin/product-briefs').send({ categoryId: 'category-1', subCategoryId: 'subcategory-1', brief: 'Facts only' })).status, 201);
 });

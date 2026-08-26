@@ -993,6 +993,29 @@ function ProductsAdmin() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function selectCategory(categoryId) {
+    setEditId("");
+    setForm({ categoryId, subCategoryId: "", brief: "" });
+    setMessage("");
+  }
+
+  function selectSubCategory(subCategoryId) {
+    const existing = items.find(
+      (item) =>
+        String(item.categoryId) === String(form.categoryId) &&
+        String(item.subCategoryId) === String(subCategoryId),
+    );
+    setEditId(existing?.id || "");
+    setForm({
+      categoryId: form.categoryId,
+      subCategoryId,
+      brief: existing?.brief || "",
+    });
+    setMessage(
+      existing ? "Existing description loaded. Update it below if needed." : "",
+    );
+  }
+
   const visible = items.filter((item) =>
     `${item.category} ${item.subCategory} ${item.brief}`
       .toLowerCase()
@@ -1092,13 +1115,7 @@ function ProductsAdmin() {
               <Select
                 required
                 value={form.categoryId}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    categoryId: event.target.value,
-                    subCategoryId: "",
-                  })
-                }
+                onChange={(event) => selectCategory(event.target.value)}
               >
                 <option value="">Choose a category</option>
                 {activeCategories.map((category) => (
@@ -1112,9 +1129,7 @@ function ProductsAdmin() {
                 required
                 disabled={!form.categoryId}
                 value={form.subCategoryId}
-                onChange={(event) =>
-                  setForm({ ...form, subCategoryId: event.target.value })
-                }
+                onChange={(event) => selectSubCategory(event.target.value)}
               >
                 <option value="">Choose a sub-category</option>
                 {availableSubCategories.map((subCategory) => (

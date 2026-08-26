@@ -207,6 +207,27 @@ test('visible CE evidence overrides inconsistent non-CE marker metadata', () => 
   assert.equal(parsed.finalScore, 0);
 });
 
+test('explicit negative CE text does not turn a clean call into CE', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const source = qaMarkdownResult([{ name: 'call.wav' }])
+    .replace('- **CE Alert:** Non-CE', '**CE Alert:** কোনো ক্রিটিক্যাল এরর পাওয়া যায়নি (CE Detected: False)।');
+  const parsed = parseQaMarkdownReport(source, ['call.wav'], rubric)[0];
+  assert.equal(parsed.ceDetected, false);
+  assert.equal(parsed.finalScore, 9);
+});
+
+test('aggregate total and CE penalty rows are excluded from score reconciliation', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const source = qaMarkdownResult([{ name: 'call.wav' }]).replace(
+    '| **সর্বমোট নম্বর (Total Score)** | **10** | **9** | **1** | **—** | **Non-CE** |',
+    '| **মোট নম্বর (Raw Total)** | **10** | **9** | **1** | **—** | **Raw** |\n| **ফাইনাল নম্বর (CE Penalty)** | **10** | **9** | **1** | **—** | **Non-CE** |'
+  );
+  const parsed = parseQaMarkdownReport(source, ['call.wav'], rubric)[0];
+  assert.equal(parsed.scores.length, 4);
+  assert.equal(parsed.achievedScore, 9);
+  assert.equal(parsed.deductedScore, 1);
+});
+
 test('keeps a usable Markdown audit even when the model omits the hidden markers', () => {
   const rubric = parseQaRubric('Outbound', RUBRIC);
   const source = qaMarkdownResult([{ name: 'call.wav' }])
@@ -217,6 +238,26 @@ test('keeps a usable Markdown audit even when the model omits the hidden markers
   assert.equal(parsed.fileName, 'call.wav');
   assert.equal(parsed.finalScore, 9);
   assert.equal(parsed.storageEligible, true);
+});
+
+test('reads a Bengali-digit final score when hidden metadata is omitted', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const source = qaMarkdownResult([{ name: 'call.wav' }])
+    .replace(/<!-- QA_META[\s\S]*?-->/, '')
+    .replace('**9 / 10**', '**৯ / ১০**');
+  const parsed = parseQaMarkdownReport(source, ['call.wav'], rubric)[0];
+  assert.equal(parsed.finalScore, 9);
+  assert.equal(parsed.maximum, 10);
+  assert.equal(parsed.storageEligible, true);
+});
+
+test('reads Bengali advisor-name labels when hidden metadata is omitted', () => {
+  const rubric = parseQaRubric('Outbound', RUBRIC);
+  const source = qaMarkdownResult([{ name: 'call.wav' }])
+    .replace(/<!-- QA_META[\s\S]*?-->/, '')
+    .replace('**এজেন্টের নাম:** Agent One', '**অ্যাডভাইজরের নাম:** Khadiza');
+  const parsed = parseQaMarkdownReport(source, ['call.wav'], rubric)[0];
+  assert.equal(parsed.agentName, 'Khadiza');
 });
 
 test('Markdown QA prompt uses one run, preserves score sections, checks products, and treats the rubric contextually', () => {

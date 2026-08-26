@@ -10,7 +10,7 @@ The portal runs through a Node backend and MongoDB. The five primary collections
 
 MongoDB also stores `analysis_jobs`, `analysis_cache`, `rate_limit_state`, and GridFS `audio_files` data. These support persistent queued work, duplicate-request coalescing, six-hour result caching, and controlled Gemini request spacing without changing report content.
 
-QA Scorecard evaluates uploaded calls and renders one report per successful call plus a server-generated run summary. Customer Voice and Advisor Coaching remain summary-only. All three modes use `gemini-3.6-flash`. Report layouts are loaded from `templates/` on every run.
+QA Scorecard evaluates uploaded calls and renders one report per successful call plus a server-generated run summary. Customer Voice and Advisor Coaching remain summary-only. Gemini starts with `gemini-3.6-flash` and uses the configured fallback order only when a model cannot serve the request. Report layouts are loaded from `templates/` on every run.
 
 ## Local setup
 

@@ -14,14 +14,17 @@ const DIST_DIR = path.join(ROOT, 'dist');
 const DIST_INDEX_PATH = path.join(DIST_DIR, 'index.html');
 const TEMPLATE_DIR = process.env.TEMPLATE_DIR || path.join(ROOT, 'templates');
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash'];
+const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 const DEFAULT_OPENAI_MODELS = ['gpt-4o-audio-preview', 'gpt-4o-mini-audio-preview'];
 const DEFAULT_GEMINI_DEADLINE_MS = 10 * 60 * 1000;
 const DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS = 590 * 1000;
 const DEFAULT_GEMINI_RETRY_DELAY_MS = 15 * 1000;
 const DEFAULT_GEMINI_MAX_ROUNDS = 1;
+const DEFAULT_GEMINI_TEMPERATURE = 0.2;
+const ANALYSIS_VERSION = '2026-08-26-simple-prompt-v1';
 
 function envNumber(name, fallback) { const value = Number.parseInt(process.env[name] || '', 10); return Number.isFinite(value) && value > 0 ? value : fallback; }
+function envFloat(name, fallback) { const value = Number.parseFloat(process.env[name] || ''); return Number.isFinite(value) && value >= 0 && value <= 2 ? value : fallback; }
 function envList(name, fallback) { const value = (process.env[name] || '').split(',').map(item => item.trim()).filter(Boolean); return value.length ? value : fallback; }
 function normalizeEmail(value) { return String(value || '').trim().toLowerCase(); }
 function safeEqual(left, right) { const a = Buffer.from(String(left || '')); const b = Buffer.from(String(right || '')); return a.length === b.length && crypto.timingSafeEqual(a, b); }
@@ -91,8 +94,9 @@ function createProviderClient(config = {}) {
   const geminiAttemptTimeoutMs = config.geminiAttemptTimeoutMs ?? envNumber('GEMINI_ATTEMPT_TIMEOUT_MS', DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS);
   const geminiRetryDelayMs = config.geminiRetryDelayMs ?? envNumber('GEMINI_RETRY_DELAY_MS', DEFAULT_GEMINI_RETRY_DELAY_MS);
   const geminiMaxRounds = config.geminiMaxRounds ?? envNumber('GEMINI_MAX_ROUNDS', DEFAULT_GEMINI_MAX_ROUNDS);
+  const geminiTemperature = config.geminiTemperature ?? envFloat('GEMINI_TEMPERATURE', DEFAULT_GEMINI_TEMPERATURE);
   async function callGemini(apiKey, audioFiles, prompt, schema, models = geminiModels, callOptions = {}) {
-    const generationConfig = { temperature: 0 };
+    const generationConfig = { temperature: geminiTemperature };
     if (schema) { generationConfig.responseMimeType = 'application/json'; generationConfig.responseJsonSchema = schema; }
     const payload = { contents: [{ parts: [{ text: prompt }, ...audioFiles.map(file => ({ inlineData: { mimeType: file.mimeType, data: file.data } }))] }], generationConfig };
     const deadlineMs = callOptions.deadlineMs ?? geminiDeadlineMs;
@@ -129,8 +133,8 @@ function createProviderClient(config = {}) {
         if (response.ok) {
           const text = data.candidates?.[0]?.content?.parts?.find(part => part.text)?.text;
           if (text) {
-            if (!schema) return String(text).trim();
-            try { return parseJsonText(text); }
+            if (!schema) { console.log(`Gemini model ${model} completed the Markdown analysis.`); return String(text).trim(); }
+            try { const result = parseJsonText(text); console.log(`Gemini model ${model} completed the structured analysis.`); return result; }
             catch { attempts.push({ model, round: round + 1, errorCode: 'invalid_response' }); lastFailure = providerError('Gemini returned malformed structured JSON.', 'invalid_response', true, response.status, attempts); continue; }
           }
           attempts.push({ model, round: round + 1, errorCode: 'invalid_response', status: response.status });
@@ -199,8 +203,8 @@ function createProviderClient(config = {}) {
     throw providerError(lastError, /quota|rate limit/i.test(lastError) ? 'rate_limited' : 'provider_unavailable', true);
   }
   return {
-    async callStructured(provider, key, files, prompt, schema) { return provider === 'gemini' ? callGemini(key, files, prompt, schema, geminiModels.slice(0, 1), { maxRounds: 1 }) : callOpenAI(key, files, prompt, schema); },
-    async callMarkdown(provider, key, files, prompt) { return provider === 'gemini' ? callGemini(key, files, prompt, null, geminiModels.slice(0, 1), { maxRounds: 1 }) : callOpenAIMarkdown(key, files, prompt); },
+    async callStructured(provider, key, files, prompt, schema) { return provider === 'gemini' ? callGemini(key, files, prompt, schema, geminiModels, { maxRounds: 1 }) : callOpenAI(key, files, prompt, schema); },
+    async callMarkdown(provider, key, files, prompt) { return provider === 'gemini' ? callGemini(key, files, prompt, null, geminiModels, { maxRounds: 1 }) : callOpenAIMarkdown(key, files, prompt); },
     callGemini, callOpenAI, callOpenAIMarkdown
   };
 }
@@ -243,41 +247,26 @@ function qaMarkdownPrompt(company, rubric, products, files, evaluationDate) {
   const recordings = files.map((file, index) => `${index + 1}. ${JSON.stringify(file.name)} — use audio attachment ${index + 1}`).join('\n');
   const ceRules = rubric.criticalErrors.length ? rubric.criticalErrors.map(rule => `- ${rule}`).join('\n') : '- No CE rules are configured.';
   const selectedFacts = products.length ? productContext(products) : 'No product/category was selected in the portal.';
-  return `You are a senior Call Quality Auditor for ${company}. Analyze all ${files.length} attached recordings in ONE response. Evaluate each recording independently and write the complete response in Bangla Markdown. Do not return a JSON response or a code fence. Do not create a run summary; the server creates it locally.
+  return `You are a world-class Quality Assurance Manager and Call Evaluator for ${company}. Listen carefully to all ${files.length} attached recordings and evaluate each call independently. Return one clean Bangla Markdown response—no JSON, no code fence, and no run summary. The server creates the run summary locally.
 
-RECORDING MAP (audio attachments are in this exact order):
+RECORDINGS (same order as the audio attachments):
 ${recordings}
 
-RELIABLE REPORT BOUNDARIES:
-- Wrap every individual call report with these exact invisible Markdown comments:
+For each call, use the exact filename and wrap its report with:
   <!-- QA_CALL_START {"fileName":"exact filename"} -->
   <!-- QA_META {"fileName":"exact filename","agentName":"detected name or শনাক্ত করা যায়নি","finalScore":81,"maximum":${rubric.maximum},"ceDetected":false} -->
   ...report Markdown...
   <!-- QA_CALL_END -->
-- Use the exact filename from the recording map. The QA_META values must agree with the visible report, but the report remains useful even if a marker has a formatting mistake.
 
-CALL PURPOSE AND PARAMETER APPLICABILITY:
-- First understand why the call happened, whether the customer is already enrolled, and what the advisor was reasonably expected to do.
-- Use the live rubric as the scoring framework, not as a blind checklist. Show every rubric row in the score table, but do not deduct for an action that was genuinely outside the call's purpose.
-- For a clearly enrolled customer receiving feedback, service-check, or support, Sale/Sales/Product Pitch is not applicable unless the call contains a real upsell, cross-sell, renewal, or new-sale objective. Give non-applicable pitch rows full marks and explain why.
-- Apply the same fairness principle to any other demonstrably irrelevant row. Do not invent an exemption when the call purpose is unclear.
-
-PRODUCT FACT CHECK — MANDATORY WHEN PRODUCT CONTEXT IS SELECTED:
-- Treat the selected product facts below as the authoritative source.
-- Identify every concrete product claim made in the call. For each claim, cite [MM:SS], state the advisor's claim, the matching official fact, and verdict: Correct / Incorrect / Not verifiable.
-- Missing product discussion is not automatically an error when product discussion was outside the call purpose.
-- If an advisor claim contradicts an official selected fact, explain it clearly and evaluate Wrong information / Wrong guidance CE according to the live CE rules.
-- If no product was selected, explicitly write that product-specific verification was unavailable; never pretend an official product fact was checked.
+MANDATORY AUDIT RULES:
+- First identify the call objective and whether the customer is already enrolled. Apply the live rubric contextually, not as a blind checklist; do not deduct for something genuinely outside the call's purpose.
+- For an enrolled customer receiving feedback, service-check, or support, Sale/Sales/Product Pitch is not applicable unless there is a real upsell, cross-sell, renewal, or new-sale objective. Give non-applicable pitch rows full marks and explain briefly.
+- When official product facts are provided, verify every concrete claim in a table: Timestamp | Advisor claim | Official fact | Correct / Incorrect / Not verifiable. Contradictions may trigger Wrong information or Wrong guidance CE. If no product is selected, state that product verification was unavailable and invent nothing.
+- Check every live CE rule. Any evidenced CE sets the final score to 0 regardless of raw marks. Evidence-based scolding, shaming, belittling, mocking, insulting, contemptuous questioning, or humiliation is Rudeness CE. Keep the CE decision, visible score, and QA_META consistent.
+- Cite precise [MM:SS] timestamps for every deduction, strength, correction, and recommendation. Score every live rubric row once and reconcile achieved, deducted, and final totals.
 
 SELECTED OFFICIAL PRODUCT FACTS:
 ${selectedFacts}
-
-CRITICAL ERROR DECISION — STRICT:
-- Check every listed CE rule before finalizing the score. If any CE is evidenced, ceDetected must be true and finalScore must be 0 regardless of raw points.
-- Rudeness includes scolding, shaming, belittling, mocking, insulting, contemptuous questioning, or humiliating the customer/student even without profanity. Cite exact words and timestamps.
-- Judgmental rhetorical questions, repeatedly putting a customer/student on the spot, reprimanding them like a parent/teacher, or language that makes them feel foolish are Rudeness CE—not merely a Soft Skills deduction.
-- If your own report describes the advisor as scolding, shaming, humiliating, rude, offensive, belittling, mocking, or using কটূক্তি/খোঁটা/বকাঝকা/ধমক/অপমান, you MUST classify Rudeness CE and set the final score to 0. You may not describe that conduct and then downgrade it to an ordinary tone issue.
-- Direct but respectful guidance is not CE. Base the distinction on quoted words, delivery, context, repetition, and customer impact. Keep the visible CE explanation, score, and QA_META consistent.
 
 LIVE CE RULES:
 ${ceRules}
@@ -285,21 +274,18 @@ ${ceRules}
 LIVE RUBRIC (${rubric.name}, maximum ${rubric.maximum}):
 ${rubric.source}
 
-REQUIRED MARKDOWN SECTIONS FOR EACH CALL:
+REQUIRED SECTIONS FOR EACH CALL:
 # 📊 ${company} - QA Audit & Call Scorecard Report
 ## ১. কলের সংক্ষিপ্ত তথ্য (Call Summary)
-- Include topic, customer type/need, call purpose, enrollment status, duration/tone, agent name, evaluation date (${evaluationDate}), and final score.
+- Topic, customer need/type, call purpose, enrollment status, duration/tone, agent name, evaluation date (${evaluationDate}), and final score.
 ## ২. প্রোডাক্ট ফ্যাক্ট-চেক ও ক্রিটিক্যাল এরর অডিট (Product Fact-Check & Critical Error Audit)
-- Include a product-claim verification table with Timestamp | Advisor claim | Official fact | Verdict, followed by CE evidence and CE Alert.
+- Product-claim table, CE evidence, and CE Alert.
 ## ৩. QA স্কোরকার্ড ও স্কোর ব্রেকডাউন (QA Scorecard Breakdown)
 | প্যারামিটার | সর্বোচ্চ নম্বর | অর্জিত নম্বর | কাটা নম্বর | টাইমস্ট্যাম্প [MM:SS] | নম্বর কাটার বিবরণ ও সংক্ষেপ |
-- Use one row for every live rubric sub-parameter. Format the first cell as **Category**<br>Parameter. Reconcile the visible totals carefully, but prioritize an evidence-grounded audit over mechanical rejection.
 ## ৪. মার্ক কাটার বিস্তারিত কারণ ও বিচার বিশ্লেষণ (Deduction Justification)
 ## ৫. এডভাইসরের ভালো দিকসমূহ (Strengths / Pros)
 ## ৬. ভুল Approach বনাম সঠিক Approach (Script Correction)
-## ৭. অ্যাকশনেবল পরামর্শ ও ফাইনাল পারফরম্যান্স রেটিং (Actionable Coaching & Final Rating)
-- Every deduction, strength, correction, and recommendation must cite a precise [MM:SS] timestamp.
-- Suggestions must respond to observed moments in the audio, not generic advice.`;
+## ৭. অ্যাকশনেবল পরামর্শ ও ফাইনাল পারফরম্যান্স রেটিং (Actionable Coaching & Final Rating)`;
 }
 function markdownRunSummary(results) {
   return {
@@ -337,8 +323,8 @@ async function prepareAnalysis(dataStore, user, input, audioFiles, templateDir) 
   const templateKeys = input.mode === 'single' ? ['qaSummary'] : [input.mode];
   const templates = pipeline.loadAndValidateTemplates(templateDir, templateKeys);
   const identity = input.mode === 'single'
-    ? `qa-markdown\n${user.companyName}\n${parameter}\n${rubric.source}\n${productContext(products)}\n${templates.qaSummary}`
-    : `${input.mode}\n${user.companyName}\n${parameter}\n${rubric?.source || ''}\n${productContext(products)}\n${templates[input.mode]}`;
+    ? `${ANALYSIS_VERSION}\nqa-markdown\n${user.companyName}\n${parameter}\n${rubric.source}\n${productContext(products)}\n${templates.qaSummary}`
+    : `${ANALYSIS_VERSION}\n${input.mode}\n${user.companyName}\n${parameter}\n${rubric?.source || ''}\n${productContext(products)}\n${templates[input.mode]}`;
   return { apiKey, products, parameter, rubric, templates, cacheKey: analysisCacheKey(user, input.provider, identity, audioFiles) };
 }
 

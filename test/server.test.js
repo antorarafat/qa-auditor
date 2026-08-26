@@ -222,14 +222,15 @@ test('keeps a usable Markdown audit even when the model omits the hidden markers
 test('Markdown QA prompt uses one run, preserves score sections, checks products, and treats the rubric contextually', () => {
   const rubric = parseQaRubric('Outbound', RUBRIC);
   const prompt = qaMarkdownPrompt('Robi', rubric, [{ category: 'HSC', subCategory: 'Science', brief: 'Official facts' }], [{ name: 'call.wav' }], '2026-08-25');
-  assert.match(prompt, /Analyze all 1 attached recordings in ONE response/);
-  assert.match(prompt, /Do not return a JSON response or a code fence/);
+  assert.match(prompt, /all 1 attached recordings/);
+  assert.match(prompt, /no JSON, no code fence/);
   assert.match(prompt, /QA_META/);
-  assert.match(prompt, /Use the live rubric as the scoring framework, not as a blind checklist/);
-  assert.match(prompt, /you MUST classify Rudeness CE/);
-  assert.match(prompt, /Identify every concrete product claim/);
+  assert.match(prompt, /Apply the live rubric contextually, not as a blind checklist/);
+  assert.match(prompt, /is Rudeness CE/);
+  assert.match(prompt, /verify every concrete claim/);
   assert.match(prompt, /Official facts/);
   assert.match(prompt, /QA স্কোরকার্ড ও স্কোর ব্রেকডাউন/);
+  assert.ok(prompt.length < 5000);
 });
 
 test('constrains every Gemini score position to the exact live rubric row and weight', () => {
@@ -286,7 +287,7 @@ test('sends full JSON Schema through Gemini responseJsonSchema, not the legacy O
   const result = await client.callStructured('gemini', 'test-key', [], 'Return a status.', schema);
   assert.deepEqual(result, { status: 'ok' });
   assert.deepEqual(requestBody.generationConfig.responseJsonSchema, schema);
-  assert.equal(requestBody.generationConfig.temperature, 0);
+  assert.equal(requestBody.generationConfig.temperature, 0.2);
   assert.equal('responseSchema' in requestBody.generationConfig, false);
 });
 
@@ -297,22 +298,22 @@ test('plain Markdown Gemini calls omit the structured-output schema', async () =
     fetchImpl: async (_url, options) => { requestBody = JSON.parse(options.body); return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '# Audit report' }] } }] }; } }; }
   });
   assert.equal(await client.callMarkdown('gemini', 'test-key', [], 'Return Markdown.'), '# Audit report');
-  assert.equal(requestBody.generationConfig.temperature, 0);
+  assert.equal(requestBody.generationConfig.temperature, 0.2);
   assert.equal('responseMimeType' in requestBody.generationConfig, false);
   assert.equal('responseJsonSchema' in requestBody.generationConfig, false);
 });
 
-test('QA Markdown makes one Gemini request without fallback or retry amplification', async () => {
+test('QA Markdown falls back once per configured model without retrying a full round', async () => {
   let requests = 0;
   const client = createProviderClient({
     geminiModels: ['gemini-3.6-flash', 'gemini-3.5-flash-lite'], geminiMaxRounds: 3,
-    fetchImpl: async () => { requests += 1; return { ok: false, status: 429, headers: { get: () => '0' }, async json() { return { error: { message: 'Quota exceeded' } }; } }; }
+    fetchImpl: async url => { requests += 1; if (url.includes('gemini-3.6-flash')) return { ok: false, status: 429, headers: { get: () => '0' }, async json() { return { error: { message: 'Quota exceeded' } }; } }; return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '# Audit report' }] } }] }; } }; }
   });
-  await assert.rejects(client.callMarkdown('gemini', 'test-key', [], 'Return Markdown.'), error => error.errorCode === 'rate_limited');
-  assert.equal(requests, 1);
+  assert.equal(await client.callMarkdown('gemini', 'test-key', [], 'Return Markdown.'), '# Audit report');
+  assert.equal(requests, 2);
 });
 
-test('Customer Voice and Advisor Coaching use 3.6 Flash without a lighter-model downgrade', async () => {
+test('Customer Voice and Advisor Coaching prefer 3.6 Flash', async () => {
   const requestedModels = [];
   const client = createProviderClient({
     geminiModels: ['gemini-3.6-flash', 'gemini-3.5-flash-lite'], geminiMaxRounds: 3,
@@ -334,7 +335,7 @@ test('makes the live CE rules and rudeness zero-score override explicit', () => 
   assert.match(prompt, /award its full maximum score/);
 });
 
-test('uses Gemini 3.6 Flash as the only default evaluation model', async () => {
+test('uses the approved Gemini fallback order by default', async () => {
   const previous = process.env.GEMINI_MODELS;
   delete process.env.GEMINI_MODELS;
   const requestedModels = [];
@@ -342,6 +343,7 @@ test('uses Gemini 3.6 Flash as the only default evaluation model', async () => {
     const client = createProviderClient({
       fetchImpl: async url => {
         requestedModels.push(url);
+        if (!url.includes('gemini-2.5-flash-lite')) return { ok: false, status: 429, headers: { get: () => '0' }, async json() { return { error: { message: 'Quota exceeded' } }; } };
         return { ok: true, status: 200, async json() { return { candidates: [{ content: { parts: [{ text: '{"status":"ok"}' }] } }] }; } };
       }
     });
@@ -350,8 +352,7 @@ test('uses Gemini 3.6 Flash as the only default evaluation model', async () => {
     if (previous === undefined) delete process.env.GEMINI_MODELS;
     else process.env.GEMINI_MODELS = previous;
   }
-  assert.match(requestedModels[0], /gemini-3\.6-flash/);
-  assert.equal(requestedModels.length, 1);
+  assert.deepEqual(requestedModels.map(url => decodeURIComponent(url.match(/models\/([^:]+)/)[1])), ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']);
 });
 
 test('falls back to the next Gemini model on quota or temporary provider errors', async () => {

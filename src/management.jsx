@@ -34,6 +34,235 @@ import {
   TabsTrigger,
   Textarea,
 } from "./components/ui";
+import { useLanguage } from "./language";
+
+const bnCopy = {
+  "The request could not be completed.": "অনুরোধটি সম্পন্ন করা যায়নি।",
+  "Set up QA Auditor": "QA Auditor সেটআপ করুন",
+  "Create the first administrator. The setup token comes from your server’s .env file and works only once.":
+    "প্রথম অ্যাডমিন তৈরি করুন। সেটআপ টোকেনটি সার্ভারের .env ফাইলে রয়েছে এবং একবারই ব্যবহার করা যাবে।",
+  "Setup token": "সেটআপ টোকেন",
+  Email: "ইমেইল",
+  Username: "ইউজারনেম",
+  "Company name": "কোম্পানির নাম",
+  Password: "পাসওয়ার্ড",
+  "Use 12–128 characters and do not include the username or email name.":
+    "১২–১২৮ অক্ষর ব্যবহার করুন এবং ইউজারনেম বা ইমেইলের নাম পাসওয়ার্ডে রাখবেন না।",
+  "Creating…": "তৈরি হচ্ছে…",
+  "Create administrator": "অ্যাডমিন তৈরি করুন",
+  "The new passwords do not match.": "নতুন পাসওয়ার্ড দুটি মিলছে না।",
+  "Current password": "বর্তমান পাসওয়ার্ড",
+  "New password": "নতুন পাসওয়ার্ড",
+  "Confirm new password": "নতুন পাসওয়ার্ড নিশ্চিত করুন",
+  "Saving…": "সেভ হচ্ছে…",
+  "Change password": "পাসওয়ার্ড পরিবর্তন",
+  "Set a private password": "নিজস্ব পাসওয়ার্ড সেট করুন",
+  "Your temporary password must be replaced before you can continue. Changing it signs out every device.":
+    "চালিয়ে যাওয়ার আগে অস্থায়ী পাসওয়ার্ড পরিবর্তন করতে হবে। পরিবর্তন করলে সব ডিভাইস থেকে লগআউট হবে।",
+  "Account security": "অ্যাকাউন্ট নিরাপত্তা",
+  "Manage your password and personal provider keys. Administrators cannot see these keys.":
+    "নিজের পাসওয়ার্ড ও ব্যক্তিগত প্রোভাইডার key পরিচালনা করুন। অ্যাডমিনরা এই key দেখতে পারবেন না।",
+  "Changing your password signs out every active device.":
+    "পাসওয়ার্ড পরিবর্তন করলে সব সক্রিয় ডিভাইস থেকে লগআউট হবে।",
+  "API keys": "API key",
+  "Keys are encrypted. Saved values are never shown again.":
+    "Key এনক্রিপ্টেড থাকে। সেভ করা সম্পূর্ণ key আর দেখানো হবে না।",
+  "Not configured": "সেট করা নেই",
+  Remove: "মুছুন",
+  "Remove key": "Key মুছুন",
+  "Audits using this provider will be unavailable until you add another key.":
+    "নতুন key যোগ না করা পর্যন্ত এই প্রোভাইডার দিয়ে অডিট করা যাবে না।",
+  Provider: "প্রোভাইডার",
+  "New API key": "নতুন API key",
+  "Paste a new key": "নতুন key পেস্ট করুন",
+  "Checking…": "যাচাই হচ্ছে…",
+  "Validate and save": "যাচাই করে সেভ করুন",
+  "API key encrypted and saved.": "API key এনক্রিপ্ট করে সেভ করা হয়েছে।",
+  "API key removed.": "API key মুছে ফেলা হয়েছে।",
+  "QA scorecard": "QA স্কোরকার্ড",
+  "Customer voice": "কাস্টমার ভয়েস",
+  "Advisor coaching": "এডভাইসর কোচিং",
+  "Legacy report": "পুরোনো রিপোর্ট",
+  "Report detail": "রিপোর্টের বিস্তারিত",
+  Back: "ফিরে যান",
+  Print: "প্রিন্ট",
+  Word: "Word",
+  Copy: "কপি",
+  User: "ব্যবহারকারী",
+  Model: "মডেল",
+  "Not recorded": "সংরক্ষিত নেই",
+  Source: "উৎস",
+  Cached: "ক্যাশড",
+  Fresh: "নতুন",
+  Company: "কোম্পানি",
+  Parameter: "প্যারামিটার",
+  Generic: "সাধারণ",
+  "Call failed": "কল ব্যর্থ",
+  Reports: "রিপোর্ট",
+  "All completed audit and insight reports.":
+    "সব সম্পন্ন অডিট ও ইনসাইট রিপোর্ট।",
+  "Your completed audit and insight reports.":
+    "আপনার সম্পন্ন অডিট ও ইনসাইট রিপোর্ট।",
+  "Search filename, user, or text": "ফাইল, ব্যবহারকারী বা লেখা খুঁজুন",
+  "All modes": "সব ধরন",
+  "Report mode": "রিপোর্টের ধরন",
+  "All CE statuses": "সব CE অবস্থা",
+  "CE status": "CE অবস্থা",
+  "Has CE": "CE আছে",
+  "Non-CE": "Non-CE",
+  "All users": "সব ব্যবহারকারী",
+  "Report owner": "রিপোর্টের ব্যবহারকারী",
+  "From date": "শুরুর তারিখ",
+  "To date": "শেষ তারিখ",
+  "Min score": "সর্বনিম্ন স্কোর",
+  "Minimum score": "সর্বনিম্ন স্কোর",
+  "Max score": "সর্বোচ্চ স্কোর",
+  "Maximum score": "সর্বোচ্চ স্কোর",
+  "No reports yet": "এখনও কোনো রিপোর্ট নেই",
+  "Completed audits and insight reports will appear here.":
+    "সম্পন্ন অডিট ও ইনসাইট রিপোর্ট এখানে দেখা যাবে।",
+  "Load more": "আরও দেখুন",
+  "Loading reports…": "রিপোর্ট লোড হচ্ছে…",
+  "Report run": "রিপোর্ট রান",
+  "New Audit": "নতুন অডিট",
+  "Create user": "ব্যবহারকারী তৈরি করুন",
+  "API keys are added privately by each user.":
+    "প্রত্যেক ব্যবহারকারী নিজের API key ব্যক্তিগতভাবে যোগ করবেন।",
+  "Temporary password": "অস্থায়ী পাসওয়ার্ড",
+  Accounts: "অ্যাকাউন্ট",
+  Admin: "অ্যাডমিন",
+  Deactivate: "নিষ্ক্রিয় করুন",
+  Reactivate: "সক্রিয় করুন",
+  "Reset password": "পাসওয়ার্ড রিসেট",
+  "Save temporary password": "অস্থায়ী পাসওয়ার্ড সেভ করুন",
+  Cancel: "বাতিল",
+  "User created with a temporary password.":
+    "অস্থায়ী পাসওয়ার্ডসহ ব্যবহারকারী তৈরি হয়েছে।",
+  "Temporary password saved. Their existing sessions were revoked.":
+    "অস্থায়ী পাসওয়ার্ড সেভ হয়েছে এবং আগের সব সেশন বাতিল হয়েছে।",
+  "Company name saved for future reports.":
+    "ভবিষ্যৎ রিপোর্টের জন্য কোম্পানির নাম সেভ হয়েছে।",
+  "Save company": "কোম্পানি সেভ করুন",
+  "Step 1": "ধাপ ১",
+  "Create the catalog structure": "ক্যাটালগ কাঠামো তৈরি করুন",
+  "Create a category first, then add one or more sub-categories.":
+    "প্রথমে ক্যাটাগরি তৈরি করুন, তারপর এক বা একাধিক সাব-ক্যাটাগরি যোগ করুন।",
+  "New category": "নতুন ক্যাটাগরি",
+  "Example: Professional Programs": "উদাহরণ: প্রফেশনাল প্রোগ্রাম",
+  "Create category": "ক্যাটাগরি তৈরি করুন",
+  Category: "ক্যাটাগরি",
+  "Choose a category": "ক্যাটাগরি বেছে নিন",
+  "New sub-category": "নতুন সাব-ক্যাটাগরি",
+  "Example: Data Foundations": "উদাহরণ: ডেটা ফাউন্ডেশন",
+  "Create sub-category": "সাব-ক্যাটাগরি তৈরি করুন",
+  "No sub-categories yet": "এখনও সাব-ক্যাটাগরি নেই",
+  "Step 2": "ধাপ ২",
+  "Edit description": "বিবরণ সম্পাদনা করুন",
+  "Add a description": "বিবরণ যোগ করুন",
+  "Select the category and sub-category you created, then add the factual product description.":
+    "তৈরি করা ক্যাটাগরি ও সাব-ক্যাটাগরি বেছে নিয়ে সঠিক প্রোডাক্ট বিবরণ যোগ করুন।",
+  "Sub-category": "সাব-ক্যাটাগরি",
+  "Choose a sub-category": "সাব-ক্যাটাগরি বেছে নিন",
+  "Product description": "প্রোডাক্ট বিবরণ",
+  "Add only factual information that the audit may verify.":
+    "অডিটে যাচাই করা যাবে এমন সঠিক তথ্যই যোগ করুন।",
+  "Update description": "বিবরণ আপডেট করুন",
+  "Save description": "বিবরণ সেভ করুন",
+  "Product descriptions": "প্রোডাক্ট বিবরণ",
+  "Search descriptions": "বিবরণ খুঁজুন",
+  Edit: "সম্পাদনা",
+  Restore: "ফিরিয়ে আনুন",
+  Archive: "আর্কাইভ",
+  "Category created. You can now add its sub-categories.":
+    "ক্যাটাগরি তৈরি হয়েছে। এখন সাব-ক্যাটাগরি যোগ করতে পারবেন।",
+  "Sub-category created. It is now available in the description dropdown.":
+    "সাব-ক্যাটাগরি তৈরি হয়েছে এবং বিবরণের dropdown-এ পাওয়া যাবে।",
+  "Product description saved.": "প্রোডাক্ট বিবরণ সেভ হয়েছে।",
+  "Existing description loaded. Update it below if needed.":
+    "আগের বিবরণ লোড হয়েছে। প্রয়োজন হলে নিচে আপডেট করুন।",
+  "Structured scorecard builder": "স্ট্রাকচার্ড স্কোরকার্ড বিল্ডার",
+  "Edit scorecard": "স্কোরকার্ড সম্পাদনা",
+  "Category weights and the overall total must reconcile exactly.":
+    "ক্যাটাগরির স্কোর ও মোট স্কোর অবশ্যই সমান হতে হবে।",
+  "Parameter name": "প্যারামিটারের নাম",
+  "Overall total": "মোট স্কোর",
+  "Category name": "ক্যাটাগরির নাম",
+  "Category weight": "ক্যাটাগরির স্কোর",
+  "Score row": "স্কোরের সারি",
+  Weight: "স্কোর",
+  "Add row": "সারি যোগ করুন",
+  "Remove category": "ক্যাটাগরি মুছুন",
+  "Add category": "ক্যাটাগরি যোগ করুন",
+  "Critical-error rules (one per line)":
+    "Critical-error নিয়ম (প্রতি লাইনে একটি)",
+  "Update scorecard": "স্কোরকার্ড আপডেট করুন",
+  "Save scorecard": "স্কোরকার্ড সেভ করুন",
+  Scorecards: "স্কোরকার্ড",
+  "Scorecard saved.": "স্কোরকার্ড সেভ হয়েছে।",
+  Version: "ভার্সন",
+  points: "পয়েন্ট",
+  legacy: "পুরোনো",
+  "Manage access and future audit configuration.":
+    "অ্যাক্সেস ও ভবিষ্যৎ অডিট কনফিগারেশন পরিচালনা করুন।",
+  Users: "ব্যবহারকারী",
+  Products: "প্রোডাক্ট",
+  "Admin sections": "অ্যাডমিন বিভাগ",
+  "Authentication required.": "লগইন প্রয়োজন।",
+  "Administrator access is required.": "অ্যাডমিন অনুমতি প্রয়োজন।",
+  "Account was deactivated.": "অ্যাকাউন্টটি নিষ্ক্রিয় করা হয়েছে।",
+  "This account is inactive.": "এই অ্যাকাউন্টটি নিষ্ক্রিয়।",
+  "User was not found.": "ব্যবহারকারীকে পাওয়া যায়নি।",
+  "Enter a valid email address.": "সঠিক ইমেইল দিন।",
+  "Invalid email or password.": "ইমেইল বা পাসওয়ার্ড সঠিক নয়।",
+  "Current password is incorrect.": "বর্তমান পাসওয়ার্ড সঠিক নয়।",
+  "Password must be between 12 and 128 characters.":
+    "পাসওয়ার্ড ১২ থেকে ১২৮ অক্ষরের হতে হবে।",
+  "Password must not contain the username or email name.":
+    "পাসওয়ার্ডে ইউজারনেম বা ইমেইলের নাম রাখা যাবে না।",
+  "API key is required.": "API key প্রয়োজন।",
+  "Enter a valid provider API key.": "সঠিক প্রোভাইডার API key দিন।",
+  "The provider rejected this API key.": "প্রোভাইডার এই API key গ্রহণ করেনি।",
+  "Category name is required.": "ক্যাটাগরির নাম প্রয়োজন।",
+  "Category was not found.": "ক্যাটাগরি পাওয়া যায়নি।",
+  "Sub-category was not found.": "সাব-ক্যাটাগরি পাওয়া যায়নি।",
+  "Choose a category and sub-category, then add the description.":
+    "ক্যাটাগরি ও সাব-ক্যাটাগরি বেছে নিয়ে বিবরণ যোগ করুন।",
+  "Choose a valid category and sub-category.":
+    "সঠিক ক্যাটাগরি ও সাব-ক্যাটাগরি বেছে নিন।",
+  "Product brief was not found.": "প্রোডাক্ট বিবরণ পাওয়া যায়নি।",
+  "Product fields cannot be empty.": "প্রোডাক্টের তথ্য খালি রাখা যাবে না।",
+  "Company name is required.": "কোম্পানির নাম প্রয়োজন।",
+  "Scorecard was not found.": "স্কোরকার্ড পাওয়া যায়নি।",
+  "Scorecard category names must be unique.":
+    "স্কোরকার্ডের ক্যাটাগরির নাম আলাদা হতে হবে।",
+  "Scorecard name and at least one category are required.":
+    "স্কোরকার্ডের নাম ও কমপক্ষে একটি ক্যাটাগরি প্রয়োজন।",
+  "Every scorecard category and row needs a name and positive weight.":
+    "প্রতিটি স্কোরকার্ড ক্যাটাগরি ও সারিতে নাম এবং শূন্যের বেশি স্কোর প্রয়োজন।",
+  "Report was not found.": "রিপোর্ট পাওয়া যায়নি।",
+  "Report history is temporarily unavailable.":
+    "রিপোর্টের ইতিহাস সাময়িকভাবে পাওয়া যাচ্ছে না।",
+  "The report is temporarily unavailable.":
+    "রিপোর্টটি সাময়িকভাবে পাওয়া যাচ্ছে না।",
+  "Change your temporary password before continuing.":
+    "চালিয়ে যাওয়ার আগে অস্থায়ী পাসওয়ার্ড পরিবর্তন করুন।",
+  "At least one active administrator is required.":
+    "কমপক্ষে একজন সক্রিয় অ্যাডমিন থাকতে হবে।",
+  "You cannot deactivate your own account.":
+    "নিজের অ্যাকাউন্ট নিজে নিষ্ক্রিয় করতে পারবেন না।",
+  "Use account settings to change your own password.":
+    "নিজের পাসওয়ার্ড পরিবর্তন করতে অ্যাকাউন্ট সেটিংস ব্যবহার করুন।",
+};
+
+function useTr() {
+  const language = useLanguage();
+  return (text, values = {}) => {
+    let output = language === "bn" ? bnCopy[text] || text : text;
+    for (const [key, value] of Object.entries(values))
+      output = output.replaceAll(`{${key}}`, value);
+    return output;
+  };
+}
 
 async function api(url, options = {}) {
   const response = await fetch(url, {
@@ -69,15 +298,17 @@ function Markdown({ value }) {
   );
 }
 function Notice({ message, error = false }) {
+  const tr = useTr();
   return message ? (
     <div className={error ? "management-notice error" : "management-notice"}>
       {error ? <AlertTriangle size={16} /> : <Check size={16} />}
-      {message}
+      {tr(message)}
     </div>
   ) : null;
 }
 
 export function SetupScreen({ onComplete }) {
+  const tr = useTr();
   const [form, setForm] = useState({
     setupToken: "",
     email: "",
@@ -107,15 +338,16 @@ export function SetupScreen({ onComplete }) {
           <div className="setup-symbol">
             <ShieldCheck />
           </div>
-          <CardTitle>Set up QA Auditor</CardTitle>
+          <CardTitle>{tr("Set up QA Auditor")}</CardTitle>
           <CardDescription>
-            Create the first administrator. The setup token comes from your
-            server’s .env file and works only once.
+            {tr(
+              "Create the first administrator. The setup token comes from your server’s .env file and works only once.",
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form className="stack-form" onSubmit={submit}>
-            <Label>Setup token</Label>
+            <Label>{tr("Setup token")}</Label>
             <Input
               type="password"
               required
@@ -124,7 +356,7 @@ export function SetupScreen({ onComplete }) {
             />
             <div className="form-grid">
               <div>
-                <Label>Email</Label>
+                <Label>{tr("Email")}</Label>
                 <Input
                   type="email"
                   required
@@ -133,7 +365,7 @@ export function SetupScreen({ onComplete }) {
                 />
               </div>
               <div>
-                <Label>Username</Label>
+                <Label>{tr("Username")}</Label>
                 <Input
                   required
                   value={form.username}
@@ -143,7 +375,7 @@ export function SetupScreen({ onComplete }) {
                 />
               </div>
             </div>
-            <Label>Company name</Label>
+            <Label>{tr("Company name")}</Label>
             <Input
               required
               value={form.companyName}
@@ -151,7 +383,7 @@ export function SetupScreen({ onComplete }) {
                 setForm({ ...form, companyName: e.target.value })
               }
             />
-            <Label>Password</Label>
+            <Label>{tr("Password")}</Label>
             <Input
               type="password"
               minLength="12"
@@ -160,12 +392,13 @@ export function SetupScreen({ onComplete }) {
               onChange={(e) => setForm({ ...form, password: e.target.value })}
             />
             <small>
-              Use 12–128 characters and do not include the username or email
-              name.
+              {tr(
+                "Use 12–128 characters and do not include the username or email name.",
+              )}
             </small>
             <Notice message={message} error />
             <Button size="lg" disabled={busy}>
-              {busy ? "Creating…" : "Create administrator"}
+              {busy ? tr("Creating…") : tr("Create administrator")}
             </Button>
           </form>
         </CardContent>
@@ -175,6 +408,7 @@ export function SetupScreen({ onComplete }) {
 }
 
 export function PasswordChange({ forced = false, onChanged }) {
+  const tr = useTr();
   const [form, setForm] = useState({
     currentPassword: "",
     newPassword: "",
@@ -185,7 +419,7 @@ export function PasswordChange({ forced = false, onChanged }) {
   async function submit(event) {
     event.preventDefault();
     if (form.newPassword !== form.confirm)
-      return setMessage("The new passwords do not match.");
+      return setMessage(tr("The new passwords do not match."));
     setBusy(true);
     setMessage("");
     try {
@@ -199,7 +433,7 @@ export function PasswordChange({ forced = false, onChanged }) {
   }
   const content = (
     <form className="stack-form" onSubmit={submit}>
-      <Label>Current password</Label>
+      <Label>{tr("Current password")}</Label>
       <Input
         type="password"
         autoComplete="current-password"
@@ -207,7 +441,7 @@ export function PasswordChange({ forced = false, onChanged }) {
         value={form.currentPassword}
         onChange={(e) => setForm({ ...form, currentPassword: e.target.value })}
       />
-      <Label>New password</Label>
+      <Label>{tr("New password")}</Label>
       <Input
         type="password"
         autoComplete="new-password"
@@ -216,7 +450,7 @@ export function PasswordChange({ forced = false, onChanged }) {
         value={form.newPassword}
         onChange={(e) => setForm({ ...form, newPassword: e.target.value })}
       />
-      <Label>Confirm new password</Label>
+      <Label>{tr("Confirm new password")}</Label>
       <Input
         type="password"
         autoComplete="new-password"
@@ -225,7 +459,9 @@ export function PasswordChange({ forced = false, onChanged }) {
         onChange={(e) => setForm({ ...form, confirm: e.target.value })}
       />
       <Notice message={message} error />
-      <Button disabled={busy}>{busy ? "Saving…" : "Change password"}</Button>
+      <Button disabled={busy}>
+        {busy ? tr("Saving…") : tr("Change password")}
+      </Button>
     </form>
   );
   if (!forced) return content;
@@ -233,10 +469,11 @@ export function PasswordChange({ forced = false, onChanged }) {
     <div className="login-shell">
       <Card className="login-card">
         <CardHeader>
-          <CardTitle>Set a private password</CardTitle>
+          <CardTitle>{tr("Set a private password")}</CardTitle>
           <CardDescription>
-            Your temporary password must be replaced before you can continue.
-            Changing it signs out every device.
+            {tr(
+              "Your temporary password must be replaced before you can continue. Changing it signs out every device.",
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>{content}</CardContent>
@@ -246,6 +483,7 @@ export function PasswordChange({ forced = false, onChanged }) {
 }
 
 export function AccountView({ user, onSignedOut }) {
+  const tr = useTr();
   const [keys, setKeys] = useState(user.apiKeyStatus || {});
   const [provider, setProvider] = useState("gemini");
   const [apiKey, setApiKey] = useState("");
@@ -262,7 +500,7 @@ export function AccountView({ user, onSignedOut }) {
       );
       setKeys((current) => ({ ...current, [provider]: data.apiKey }));
       setApiKey("");
-      setMessage(data.warning || "API key encrypted and saved.");
+      setMessage(data.warning || tr("API key encrypted and saved."));
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -273,24 +511,26 @@ export function AccountView({ user, onSignedOut }) {
     try {
       await api(`/api/account/api-keys/${name}`, { method: "DELETE" });
       setKeys((current) => ({ ...current, [name]: { configured: false } }));
-      setMessage("API key removed.");
+      setMessage(tr("API key removed."));
     } catch (error) {
       setMessage(error.message);
     }
   }
   return (
     <Workspace
-      title="Account security"
-      subtitle="Manage your password and personal provider keys. Administrators cannot see these keys."
+      title={tr("Account security")}
+      subtitle={tr(
+        "Manage your password and personal provider keys. Administrators cannot see these keys.",
+      )}
     >
       <div className="management-grid two">
         <Card>
           <CardHeader>
             <CardTitle>
-              <KeyRound size={18} /> Password
+              <KeyRound size={18} /> {tr("Password")}
             </CardTitle>
             <CardDescription>
-              Changing your password signs out every active device.
+              {tr("Changing your password signs out every active device.")}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -300,10 +540,10 @@ export function AccountView({ user, onSignedOut }) {
         <Card>
           <CardHeader>
             <CardTitle>
-              <ShieldCheck size={18} /> API keys
+              <ShieldCheck size={18} /> {tr("API keys")}
             </CardTitle>
             <CardDescription>
-              Keys are encrypted. Saved values are never shown again.
+              {tr("Keys are encrypted. Saved values are never shown again.")}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -317,19 +557,21 @@ export function AccountView({ user, onSignedOut }) {
                     <span>
                       {keys[name]?.configured
                         ? `•••• ${keys[name].lastFour} · ${keys[name].status || "saved"}`
-                        : "Not configured"}
+                        : tr("Not configured")}
                     </span>
                   </div>
                   {keys[name]?.configured && (
                     <ConfirmDialog
                       trigger={
                         <Button variant="ghost" size="sm">
-                          Remove
+                          {tr("Remove")}
                         </Button>
                       }
-                      title={`Remove ${name === "gemini" ? "Google Gemini" : "OpenAI"} key?`}
-                      description="Audits using this provider will be unavailable until you add another key."
-                      confirmLabel="Remove key"
+                      title={`${tr("Remove")} ${name === "gemini" ? "Google Gemini" : "OpenAI"} API key?`}
+                      description={tr(
+                        "Audits using this provider will be unavailable until you add another key.",
+                      )}
+                      confirmLabel={tr("Remove key")}
                       destructive
                       onConfirm={() => removeKey(name)}
                     />
@@ -338,7 +580,7 @@ export function AccountView({ user, onSignedOut }) {
               ))}
             </div>
             <form className="stack-form compact" onSubmit={saveKey}>
-              <Label>Provider</Label>
+              <Label>{tr("Provider")}</Label>
               <Select
                 value={provider}
                 onValueChange={setProvider}
@@ -347,20 +589,20 @@ export function AccountView({ user, onSignedOut }) {
                   { value: "openai", label: "OpenAI" },
                 ]}
               />
-              <Label>New API key</Label>
+              <Label>{tr("New API key")}</Label>
               <Input
                 type="password"
                 required
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Paste a new key"
+                placeholder={tr("Paste a new key")}
               />
               <Notice
                 message={message}
                 error={/rejected|could not|invalid/i.test(message)}
               />
               <Button disabled={busy}>
-                {busy ? "Checking…" : "Validate and save"}
+                {busy ? tr("Checking…") : tr("Validate and save")}
               </Button>
             </form>
           </CardContent>
@@ -384,18 +626,18 @@ function Workspace({ title, subtitle, actions, children }) {
     </div>
   );
 }
-function modeName(mode) {
+function modeName(mode, tr = (text) => text) {
   return mode === "single"
-    ? "QA scorecard"
+    ? tr("QA scorecard")
     : mode === "voice"
-      ? "Customer voice"
+      ? tr("Customer voice")
       : mode === "coaching"
-        ? "Advisor coaching"
-        : "Legacy report";
+        ? tr("Advisor coaching")
+        : tr("Legacy report");
 }
-function dateText(value) {
+function dateText(value, language = "en") {
   try {
-    return new Intl.DateTimeFormat(undefined, {
+    return new Intl.DateTimeFormat(language === "bn" ? "bn-BD" : "en", {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(new Date(value));
@@ -404,7 +646,9 @@ function dateText(value) {
   }
 }
 
-export function ReportsView({ user }) {
+export function ReportsView({ user, onNewAudit }) {
+  const tr = useTr();
+  const language = useLanguage();
   const [data, setData] = useState({ items: [], nextCursor: null });
   const [selected, setSelected] = useState(null);
   const [owners, setOwners] = useState([]);
@@ -477,17 +721,17 @@ export function ReportsView({ user }) {
   if (selected)
     return (
       <Workspace
-        title="Report detail"
+        title={tr("Report detail")}
         actions={
           <div className="form-actions">
             <Button variant="outline" onClick={() => setSelected(null)}>
-              <ChevronLeft size={16} /> Back
+              <ChevronLeft size={16} /> {tr("Back")}
             </Button>
             <Button variant="outline" onClick={() => window.print()}>
               <FileDown size={15} /> PDF
             </Button>
             <Button variant="outline" onClick={downloadWord}>
-              <FileText size={15} /> Word
+              <FileText size={15} /> {tr("Word")}
             </Button>
             <Button
               variant="outline"
@@ -495,45 +739,51 @@ export function ReportsView({ user }) {
                 navigator.clipboard?.writeText(selected.report || "")
               }
             >
-              <Check size={15} /> Copy
+              <Check size={15} /> {tr("Copy")}
+            </Button>
+            <Button onClick={onNewAudit}>
+              <Plus size={15} /> {tr("New Audit")}
             </Button>
           </div>
         }
       >
         <Card className="history-detail">
           <CardHeader>
-            <CardTitle>{modeName(selected.mode)}</CardTitle>
+            <CardTitle>{modeName(selected.mode, tr)}</CardTitle>
             <CardDescription>
               {selected.ownerName || selected.ownerEmail} ·{" "}
-              {dateText(selected.completedAt || selected.createdAt)}
+              {dateText(selected.completedAt || selected.createdAt, language)}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="report-facts">
               <span>
-                Model<strong>{selected.model || "Not recorded"}</strong>
+                {tr("Model")}
+                <strong>{selected.model || tr("Not recorded")}</strong>
               </span>
               <span>
-                Source<strong>{selected.cached ? "Cached" : "Fresh"}</strong>
+                {tr("Source")}
+                <strong>{selected.cached ? tr("Cached") : tr("Fresh")}</strong>
               </span>
               <span>
-                Company<strong>{selected.companySnapshot}</strong>
+                {tr("Company")}
+                <strong>{selected.companySnapshot}</strong>
               </span>
               <span>
-                Parameter
-                <strong>{selected.parameterSnapshot || "Generic"}</strong>
+                {tr("Parameter")}
+                <strong>{selected.parameterSnapshot || tr("Generic")}</strong>
               </span>
             </div>
             {selected.items?.map((item, index) =>
               item.status === "success" ? (
                 <section className="history-report" key={index}>
-                  <h3>{item.fileName || modeName(item.kind)}</h3>
+                  <h3>{item.fileName || modeName(item.kind, tr)}</h3>
                   <Markdown value={item.markdown} />
                 </section>
               ) : (
                 <Notice
                   key={index}
-                  message={`${item.fileName || "Call"} failed: ${item.error}`}
+                  message={`${item.fileName || tr("Call failed")}: ${item.error}`}
                   error
                 />
               ),
@@ -544,11 +794,16 @@ export function ReportsView({ user }) {
     );
   return (
     <Workspace
-      title="Reports"
+      title={tr("Reports")}
       subtitle={
         user.role === "admin"
-          ? "All completed audit and insight reports."
-          : "Your completed audit and insight reports."
+          ? tr("All completed audit and insight reports.")
+          : tr("Your completed audit and insight reports.")
+      }
+      actions={
+        <Button onClick={onNewAudit}>
+          <Plus size={16} /> {tr("New Audit")}
+        </Button>
       }
     >
       <Card>
@@ -556,8 +811,8 @@ export function ReportsView({ user }) {
           <div className="search-field">
             <Search size={16} />
             <Input
-              aria-label="Search reports"
-              placeholder="Search filename, user, or text"
+              aria-label={tr("Search filename, user, or text")}
+              placeholder={tr("Search filename, user, or text")}
               value={filters.search}
               onChange={(e) =>
                 setFilters({ ...filters, search: e.target.value })
@@ -565,37 +820,37 @@ export function ReportsView({ user }) {
             />
           </div>
           <Select
-            aria-label="Report mode"
+            aria-label={tr("Report mode")}
             value={filters.mode || "all"}
-            placeholder="All modes"
+            placeholder={tr("All modes")}
             onValueChange={(mode) =>
               setFilters({ ...filters, mode: mode === "all" ? "" : mode })
             }
             options={[
-              { value: "all", label: "All modes" },
-              { value: "single", label: "QA scorecard" },
-              { value: "voice", label: "Customer voice" },
-              { value: "coaching", label: "Advisor coaching" },
+              { value: "all", label: tr("All modes") },
+              { value: "single", label: tr("QA scorecard") },
+              { value: "voice", label: tr("Customer voice") },
+              { value: "coaching", label: tr("Advisor coaching") },
             ]}
           />
           <Select
-            aria-label="CE status"
+            aria-label={tr("CE status")}
             value={filters.ce || "all"}
-            placeholder="All CE statuses"
+            placeholder={tr("All CE statuses")}
             onValueChange={(ce) =>
               setFilters({ ...filters, ce: ce === "all" ? "" : ce })
             }
             options={[
-              { value: "all", label: "All CE statuses" },
-              { value: "true", label: "Has CE" },
-              { value: "false", label: "Non-CE" },
+              { value: "all", label: tr("All CE statuses") },
+              { value: "true", label: tr("Has CE") },
+              { value: "false", label: tr("Non-CE") },
             ]}
           />
           {user.role === "admin" && (
             <Select
-              aria-label="Report owner"
+              aria-label={tr("Report owner")}
               value={filters.ownerUserId || "all"}
-              placeholder="All users"
+              placeholder={tr("All users")}
               onValueChange={(ownerUserId) =>
                 setFilters({
                   ...filters,
@@ -603,7 +858,7 @@ export function ReportsView({ user }) {
                 })
               }
               options={[
-                { value: "all", label: "All users" },
+                { value: "all", label: tr("All users") },
                 ...owners.map((owner) => ({
                   value: owner.id,
                   label: owner.username,
@@ -612,40 +867,40 @@ export function ReportsView({ user }) {
             />
           )}
           <Input
-            aria-label="Parameter"
-            placeholder="Parameter"
+            aria-label={tr("Parameter")}
+            placeholder={tr("Parameter")}
             value={filters.parameter}
             onChange={(e) =>
               setFilters({ ...filters, parameter: e.target.value })
             }
           />
           <DatePicker
-            aria-label="From date"
+            aria-label={tr("From date")}
             value={filters.from}
             onChange={(from) => setFilters({ ...filters, from })}
-            placeholder="From date"
+            placeholder={tr("From date")}
           />
           <DatePicker
-            aria-label="To date"
+            aria-label={tr("To date")}
             value={filters.to}
             onChange={(to) => setFilters({ ...filters, to })}
-            placeholder="To date"
+            placeholder={tr("To date")}
           />
           <Input
-            aria-label="Minimum score"
+            aria-label={tr("Minimum score")}
             type="number"
             min="0"
-            placeholder="Min score"
+            placeholder={tr("Min score")}
             value={filters.minScore}
             onChange={(e) =>
               setFilters({ ...filters, minScore: e.target.value })
             }
           />
           <Input
-            aria-label="Maximum score"
+            aria-label={tr("Maximum score")}
             type="number"
             min="0"
-            placeholder="Max score"
+            placeholder={tr("Max score")}
             value={filters.maxScore}
             onChange={(e) =>
               setFilters({ ...filters, maxScore: e.target.value })
@@ -667,10 +922,10 @@ export function ReportsView({ user }) {
               <FileText size={18} />
             </div>
             <div className="history-main">
-              <strong>{modeName(item.mode)}</strong>
+              <strong>{modeName(item.mode, tr)}</strong>
               <span>
                 {item.files?.map((file) => file.name).join(", ") ||
-                  "Report run"}
+                  tr("Report run")}
               </span>
             </div>
             <div className="history-meta">
@@ -683,7 +938,7 @@ export function ReportsView({ user }) {
                 {user.role === "admin"
                   ? `${item.ownerName || item.ownerEmail} · `
                   : ""}
-                {dateText(item.createdAt)}
+                {dateText(item.createdAt, language)}
               </span>
             </div>
             {item.ceCount > 0 && <span className="ce-badge">CE</span>}
@@ -692,19 +947,21 @@ export function ReportsView({ user }) {
         {!busy && !data.items.length && (
           <div className="empty-state">
             <FileText />
-            <strong>No reports yet</strong>
-            <span>Completed audits and insight reports will appear here.</span>
+            <strong>{tr("No reports yet")}</strong>
+            <span>
+              {tr("Completed audits and insight reports will appear here.")}
+            </span>
           </div>
         )}
       </div>
       {busy && (
         <div className="inline-loading">
-          <RefreshCw className="spin" /> Loading reports…
+          <RefreshCw className="spin" /> {tr("Loading reports…")}
         </div>
       )}
       {data.nextCursor && !busy && (
         <Button variant="outline" onClick={() => load(data.nextCursor, true)}>
-          Load more
+          {tr("Load more")}
         </Button>
       )}
     </Workspace>
@@ -712,6 +969,7 @@ export function ReportsView({ user }) {
 }
 
 function UsersAdmin() {
+  const tr = useTr();
   const [users, setUsers] = useState([]);
   const [form, setForm] = useState({ email: "", username: "", password: "" });
   const [reset, setReset] = useState({ userId: "", password: "" });
@@ -731,7 +989,7 @@ function UsersAdmin() {
     try {
       await api("/api/admin/users", body("POST", form));
       setForm({ email: "", username: "", password: "" });
-      setMessage("User created with a temporary password.");
+      setMessage(tr("User created with a temporary password."));
       load();
     } catch (error) {
       setMessage(error.message);
@@ -757,7 +1015,7 @@ function UsersAdmin() {
       );
       setReset({ userId: "", password: "" });
       setMessage(
-        "Temporary password saved. Their existing sessions were revoked.",
+        tr("Temporary password saved. Their existing sessions were revoked."),
       );
     } catch (error) {
       setMessage(error.message);
@@ -768,28 +1026,28 @@ function UsersAdmin() {
       <Card>
         <CardHeader>
           <CardTitle>
-            <Plus size={18} /> Create user
+            <Plus size={18} /> {tr("Create user")}
           </CardTitle>
           <CardDescription>
-            API keys are added privately by each user.
+            {tr("API keys are added privately by each user.")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form className="stack-form" onSubmit={create}>
-            <Label>Email</Label>
+            <Label>{tr("Email")}</Label>
             <Input
               type="email"
               required
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
             />
-            <Label>Username</Label>
+            <Label>{tr("Username")}</Label>
             <Input
               required
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
             />
-            <Label>Temporary password</Label>
+            <Label>{tr("Temporary password")}</Label>
             <Input
               type="password"
               minLength="12"
@@ -797,7 +1055,7 @@ function UsersAdmin() {
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
             />
-            <Button>Create user</Button>
+            <Button>{tr("Create user")}</Button>
             <Notice
               message={message}
               error={/required|found|use|least|could/i.test(message)}
@@ -808,7 +1066,7 @@ function UsersAdmin() {
       <Card>
         <CardHeader>
           <CardTitle>
-            <UsersRound size={18} /> Accounts
+            <UsersRound size={18} /> {tr("Accounts")}
           </CardTitle>
         </CardHeader>
         <CardContent className="admin-list">
@@ -825,8 +1083,8 @@ function UsersAdmin() {
                   className="role-select"
                   onValueChange={(role) => update(user, "role", role)}
                   options={[
-                    { value: "user", label: "User" },
-                    { value: "admin", label: "Admin" },
+                    { value: "user", label: tr("User") },
+                    { value: "admin", label: tr("Admin") },
                   ]}
                 />
                 <Button
@@ -840,14 +1098,16 @@ function UsersAdmin() {
                     )
                   }
                 >
-                  {user.status === "active" ? "Deactivate" : "Reactivate"}
+                  {user.status === "active"
+                    ? tr("Deactivate")
+                    : tr("Reactivate")}
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setReset({ userId: user.id, password: "" })}
                 >
-                  Reset password
+                  {tr("Reset password")}
                 </Button>
               </div>
               {reset.userId === user.id && (
@@ -865,14 +1125,14 @@ function UsersAdmin() {
                       setReset({ ...reset, password: event.target.value })
                     }
                   />
-                  <Button size="sm">Save temporary password</Button>
+                  <Button size="sm">{tr("Save temporary password")}</Button>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={() => setReset({ userId: "", password: "" })}
                   >
-                    Cancel
+                    {tr("Cancel")}
                   </Button>
                 </form>
               )}
@@ -885,6 +1145,7 @@ function UsersAdmin() {
 }
 
 function CompanyAdmin() {
+  const tr = useTr();
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   useEffect(() => {
@@ -896,7 +1157,7 @@ function CompanyAdmin() {
     event.preventDefault();
     try {
       await api("/api/admin/company", body("PUT", { companyName: name }));
-      setMessage("Company name saved for future reports.");
+      setMessage(tr("Company name saved for future reports."));
     } catch (error) {
       setMessage(error.message);
     }
@@ -904,20 +1165,20 @@ function CompanyAdmin() {
   return (
     <Card className="narrow-card">
       <CardHeader>
-        <CardTitle>Company name</CardTitle>
+        <CardTitle>{tr("Company name")}</CardTitle>
         <CardDescription>
           Historical reports keep their original company snapshot.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form className="stack-form" onSubmit={save}>
-          <Label>Company name</Label>
+          <Label>{tr("Company name")}</Label>
           <Input
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-          <Button>Save company</Button>
+          <Button>{tr("Save company")}</Button>
           <Notice message={message} error={/could|required/i.test(message)} />
         </form>
       </CardContent>
@@ -926,6 +1187,7 @@ function CompanyAdmin() {
 }
 
 function ProductsAdmin() {
+  const tr = useTr();
   const emptyBrief = { categoryId: "", subCategoryId: "", brief: "" };
   const [taxonomy, setTaxonomy] = useState([]);
   const [items, setItems] = useState([]);
@@ -965,7 +1227,7 @@ function ProductsAdmin() {
         body("POST", { name: categoryName }),
       );
       setCategoryName("");
-      setMessage("Category created. You can now add its sub-categories.");
+      setMessage(tr("Category created. You can now add its sub-categories."));
       await load();
     } catch (error) {
       setMessage(error.message);
@@ -981,7 +1243,9 @@ function ProductsAdmin() {
       );
       setSubCategoryForm({ categoryId: subCategoryForm.categoryId, name: "" });
       setMessage(
-        "Sub-category created. It is now available in the description dropdown.",
+        tr(
+          "Sub-category created. It is now available in the description dropdown.",
+        ),
       );
       await load();
     } catch (error) {
@@ -997,7 +1261,7 @@ function ProductsAdmin() {
       else await api("/api/admin/product-briefs", body("POST", form));
       setForm(emptyBrief);
       setEditId("");
-      setMessage("Product description saved.");
+      setMessage(tr("Product description saved."));
       await load();
     } catch (error) {
       setMessage(error.message);
@@ -1045,7 +1309,9 @@ function ProductsAdmin() {
       brief: existing?.brief || "",
     });
     setMessage(
-      existing ? "Existing description loaded. Update it below if needed." : "",
+      existing
+        ? tr("Existing description loaded. Update it below if needed.")
+        : "",
     );
   }
 
@@ -1060,30 +1326,32 @@ function ProductsAdmin() {
       <div className="management-grid two">
         <Card>
           <CardHeader>
-            <div className="step-label">Step 1</div>
-            <CardTitle>Create the catalog structure</CardTitle>
+            <div className="step-label">{tr("Step 1")}</div>
+            <CardTitle>{tr("Create the catalog structure")}</CardTitle>
             <CardDescription>
-              Create a category first, then add one or more sub-categories.
+              {tr(
+                "Create a category first, then add one or more sub-categories.",
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent className="catalog-setup">
             <form className="stack-form" onSubmit={createCategory}>
-              <Label>New category</Label>
+              <Label>{tr("New category")}</Label>
               <div className="inline-create">
                 <Input
                   required
                   value={categoryName}
                   onChange={(event) => setCategoryName(event.target.value)}
-                  placeholder="Example: Professional Programs"
+                  placeholder={tr("Example: Professional Programs")}
                 />
-                <Button>Create category</Button>
+                <Button>{tr("Create category")}</Button>
               </div>
             </form>
             <form className="stack-form" onSubmit={createSubCategory}>
-              <Label>Category</Label>
+              <Label>{tr("Category")}</Label>
               <Select
                 value={subCategoryForm.categoryId}
-                placeholder="Choose a category"
+                placeholder={tr("Choose a category")}
                 onValueChange={(categoryId) =>
                   setSubCategoryForm({
                     ...subCategoryForm,
@@ -1095,7 +1363,7 @@ function ProductsAdmin() {
                   label: category.name,
                 }))}
               />
-              <Label>New sub-category</Label>
+              <Label>{tr("New sub-category")}</Label>
               <div className="inline-create">
                 <Input
                   required
@@ -1106,10 +1374,10 @@ function ProductsAdmin() {
                       name: event.target.value,
                     })
                   }
-                  placeholder="Example: Data Foundations"
+                  placeholder={tr("Example: Data Foundations")}
                 />
                 <Button disabled={!subCategoryForm.categoryId}>
-                  Create sub-category
+                  {tr("Create sub-category")}
                 </Button>
               </div>
             </form>
@@ -1120,7 +1388,7 @@ function ProductsAdmin() {
                   <span>
                     {category.subCategories
                       ?.map((item) => item.name)
-                      .join(", ") || "No sub-categories yet"}
+                      .join(", ") || tr("No sub-categories yet")}
                   </span>
                 </div>
               ))}
@@ -1130,39 +1398,40 @@ function ProductsAdmin() {
 
         <Card>
           <CardHeader>
-            <div className="step-label">Step 2</div>
+            <div className="step-label">{tr("Step 2")}</div>
             <CardTitle>
-              {editId ? "Edit description" : "Add a description"}
+              {editId ? tr("Edit description") : tr("Add a description")}
             </CardTitle>
             <CardDescription>
-              Select the category and sub-category you created, then add the
-              factual product description.
+              {tr(
+                "Select the category and sub-category you created, then add the factual product description.",
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form className="stack-form" onSubmit={saveBrief}>
-              <Label>Category</Label>
+              <Label>{tr("Category")}</Label>
               <Select
                 value={form.categoryId}
-                placeholder="Choose a category"
+                placeholder={tr("Choose a category")}
                 onValueChange={selectCategory}
                 options={activeCategories.map((category) => ({
                   value: category.id,
                   label: category.name,
                 }))}
               />
-              <Label>Sub-category</Label>
+              <Label>{tr("Sub-category")}</Label>
               <Select
                 disabled={!form.categoryId}
                 value={form.subCategoryId}
-                placeholder="Choose a sub-category"
+                placeholder={tr("Choose a sub-category")}
                 onValueChange={selectSubCategory}
                 options={availableSubCategories.map((subCategory) => ({
                   value: subCategory.id,
                   label: subCategory.name,
                 }))}
               />
-              <Label>Product description</Label>
+              <Label>{tr("Product description")}</Label>
               <Textarea
                 rows="9"
                 required
@@ -1170,11 +1439,13 @@ function ProductsAdmin() {
                 onChange={(event) =>
                   setForm({ ...form, brief: event.target.value })
                 }
-                placeholder="Add only factual information that the audit may verify."
+                placeholder={tr(
+                  "Add only factual information that the audit may verify.",
+                )}
               />
               <div className="form-actions">
                 <Button disabled={!form.categoryId || !form.subCategoryId}>
-                  {editId ? "Update description" : "Save description"}
+                  {editId ? tr("Update description") : tr("Save description")}
                 </Button>
                 {editId && (
                   <Button
@@ -1185,7 +1456,7 @@ function ProductsAdmin() {
                       setForm(emptyBrief);
                     }}
                   >
-                    Cancel
+                    {tr("Cancel")}
                   </Button>
                 )}
               </div>
@@ -1200,11 +1471,11 @@ function ProductsAdmin() {
 
       <Card className="product-description-list">
         <CardHeader>
-          <CardTitle>Product descriptions</CardTitle>
+          <CardTitle>{tr("Product descriptions")}</CardTitle>
           <div className="search-field">
             <Search size={16} />
             <Input
-              placeholder="Search descriptions"
+              placeholder={tr("Search descriptions")}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -1223,11 +1494,11 @@ function ProductsAdmin() {
                 <span>{item.brief}</span>
               </div>
               <Button variant="outline" size="sm" onClick={() => edit(item)}>
-                Edit
+                {tr("Edit")}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => archive(item)}>
                 <Archive size={14} />
-                {item.archived ? "Restore" : "Archive"}
+                {item.archived ? tr("Restore") : tr("Archive")}
               </Button>
             </div>
           ))}
@@ -1237,15 +1508,16 @@ function ProductsAdmin() {
   );
 }
 function ScorecardsAdmin() {
+  const tr = useTr();
   const newDefinition = () => ({
     name: "",
     overallTotal: 100,
     criticalErrors: "",
     categories: [
       {
-        name: "Opening",
+        name: "",
         weight: 100,
-        rows: [{ name: "Greeting", weight: 100 }],
+        rows: [{ name: "", weight: 100 }],
       },
     ],
   });
@@ -1308,7 +1580,7 @@ function ScorecardsAdmin() {
       );
       setForm(newDefinition());
       setEditId("");
-      setMessage("Scorecard saved.");
+      setMessage(tr("Scorecard saved."));
       load();
     } catch (error) {
       setMessage(error.message);
@@ -1346,17 +1618,19 @@ function ScorecardsAdmin() {
       <Card>
         <CardHeader>
           <CardTitle>
-            {editId ? "Edit scorecard" : "Structured scorecard builder"}
+            {editId ? tr("Edit scorecard") : tr("Structured scorecard builder")}
           </CardTitle>
           <CardDescription>
-            Category weights and the overall total must reconcile exactly.
+            {tr(
+              "Category weights and the overall total must reconcile exactly.",
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form className="stack-form" onSubmit={save}>
             <div className="form-grid">
               <div>
-                <Label>Parameter name</Label>
+                <Label>{tr("Parameter name")}</Label>
                 <Input
                   required
                   value={form.name}
@@ -1364,7 +1638,7 @@ function ScorecardsAdmin() {
                 />
               </div>
               <div>
-                <Label>Overall total</Label>
+                <Label>{tr("Overall total")}</Label>
                 <Input
                   type="number"
                   min="1"
@@ -1380,8 +1654,8 @@ function ScorecardsAdmin() {
               <div className="builder-category" key={categoryIndex}>
                 <div className="form-grid">
                   <Input
-                    aria-label="Category name"
-                    placeholder="Category name"
+                    aria-label={tr("Category name")}
+                    placeholder={tr("Category name")}
                     required
                     value={category.name}
                     onChange={(e) =>
@@ -1389,10 +1663,10 @@ function ScorecardsAdmin() {
                     }
                   />
                   <Input
-                    aria-label="Category weight"
+                    aria-label={tr("Category weight")}
                     type="number"
                     min="1"
-                    placeholder="Weight"
+                    placeholder={tr("Weight")}
                     required
                     value={category.weight}
                     onChange={(e) =>
@@ -1403,8 +1677,8 @@ function ScorecardsAdmin() {
                 {category.rows.map((row, rowIndex) => (
                   <div className="builder-row" key={rowIndex}>
                     <Input
-                      aria-label="Score row name"
-                      placeholder="Score row"
+                      aria-label={tr("Score row")}
+                      placeholder={tr("Score row")}
                       required
                       value={row.name}
                       onChange={(e) =>
@@ -1412,7 +1686,7 @@ function ScorecardsAdmin() {
                       }
                     />
                     <Input
-                      aria-label="Score row weight"
+                      aria-label={tr("Weight")}
                       type="number"
                       min="1"
                       required
@@ -1438,7 +1712,7 @@ function ScorecardsAdmin() {
                         )
                       }
                     >
-                      Remove
+                      {tr("Remove")}
                     </Button>
                   </div>
                 ))}
@@ -1453,7 +1727,7 @@ function ScorecardsAdmin() {
                     ])
                   }
                 >
-                  <Plus size={14} /> Add row
+                  <Plus size={14} /> {tr("Add row")}
                 </Button>
                 {form.categories.length > 1 && (
                   <Button
@@ -1469,7 +1743,7 @@ function ScorecardsAdmin() {
                       }))
                     }
                   >
-                    Remove category
+                    {tr("Remove category")}
                   </Button>
                 )}
               </div>
@@ -1487,9 +1761,9 @@ function ScorecardsAdmin() {
                 }))
               }
             >
-              <Plus size={15} /> Add category
+              <Plus size={15} /> {tr("Add category")}
             </Button>
-            <Label>Critical-error rules (one per line)</Label>
+            <Label>{tr("Critical-error rules (one per line)")}</Label>
             <Textarea
               rows="5"
               value={form.criticalErrors}
@@ -1502,7 +1776,9 @@ function ScorecardsAdmin() {
               error={/must|required|exist|duplicate|positive/i.test(message)}
             />
             <div className="form-actions">
-              <Button>{editId ? "Update scorecard" : "Save scorecard"}</Button>
+              <Button>
+                {editId ? tr("Update scorecard") : tr("Save scorecard")}
+              </Button>
               {editId && (
                 <Button
                   type="button"
@@ -1512,7 +1788,7 @@ function ScorecardsAdmin() {
                     setForm(newDefinition());
                   }}
                 >
-                  Cancel
+                  {tr("Cancel")}
                 </Button>
               )}
             </div>
@@ -1521,7 +1797,7 @@ function ScorecardsAdmin() {
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Scorecards</CardTitle>
+          <CardTitle>{tr("Scorecards")}</CardTitle>
         </CardHeader>
         <CardContent className="admin-list">
           {items.map((item) => (
@@ -1532,16 +1808,16 @@ function ScorecardsAdmin() {
               <div>
                 <strong>{item.name}</strong>
                 <span>
-                  Version {item.version || 1} ·{" "}
-                  {item.definition?.overallTotal || "legacy"} points
+                  {tr("Version")} {item.version || 1} ·{" "}
+                  {item.definition?.overallTotal || tr("legacy")} {tr("points")}
                 </span>
               </div>
               <Button variant="outline" size="sm" onClick={() => edit(item)}>
-                Edit
+                {tr("Edit")}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => archive(item)}>
                 <Archive size={14} />
-                {item.archived ? "Restore" : "Archive"}
+                {item.archived ? tr("Restore") : tr("Archive")}
               </Button>
             </div>
           ))}
@@ -1552,6 +1828,7 @@ function ScorecardsAdmin() {
 }
 
 export function AdminView() {
+  const tr = useTr();
   const [tab, setTab] = useState("users");
   const views = {
     users: <UsersAdmin />,
@@ -1561,16 +1838,16 @@ export function AdminView() {
   };
   return (
     <Workspace
-      title="Admin"
-      subtitle="Manage access and future audit configuration."
+      title={tr("Admin")}
+      subtitle={tr("Manage access and future audit configuration.")}
     >
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="subnav" aria-label="Admin sections">
+        <TabsList className="subnav" aria-label={tr("Admin sections")}>
           {[
-            ["users", "Users"],
-            ["company", "Company"],
-            ["products", "Products"],
-            ["scorecards", "Scorecards"],
+            ["users", tr("Users")],
+            ["company", tr("Company")],
+            ["products", tr("Products")],
+            ["scorecards", tr("Scorecards")],
           ].map(([value, label]) => (
             <TabsTrigger key={value} value={value}>
               {label}

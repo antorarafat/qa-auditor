@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
+import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
 import * as SelectPrimitive from "@radix-ui/react-select";
@@ -335,3 +336,63 @@ export function ConfirmDialog({
     </AlertDialogPrimitive.Root>
   );
 }
+
+export const DropdownMenu = DropdownMenuPrimitive.Root;
+export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
+export const DropdownMenuContent = React.forwardRef(
+  function DropdownMenuContent(
+    { className = "", sideOffset = 7, ...props },
+    ref,
+  ) {
+    return (
+      <DropdownMenuPrimitive.Portal>
+        <DropdownMenuPrimitive.Content
+          ref={ref}
+          sideOffset={sideOffset}
+          collisionPadding={12}
+          className={cn("ui-dropdown-content", className)}
+          {...props}
+        />
+      </DropdownMenuPrimitive.Portal>
+    );
+  },
+);
+export const DropdownMenuLabel = React.forwardRef(function DropdownMenuLabel(
+  { className = "", ...props },
+  ref,
+) {
+  return (
+    <DropdownMenuPrimitive.Label
+      ref={ref}
+      className={cn("ui-dropdown-label", className)}
+      {...props}
+    />
+  );
+});
+export const DropdownMenuItem = React.forwardRef(function DropdownMenuItem(
+  { className = "", destructive = false, ...props },
+  ref,
+) {
+  return (
+    <DropdownMenuPrimitive.Item
+      ref={ref}
+      className={cn(
+        "ui-dropdown-item",
+        destructive && "destructive",
+        className,
+      )}
+      {...props}
+    />
+  );
+});
+export const DropdownMenuSeparator = React.forwardRef(
+  function DropdownMenuSeparator({ className = "", ...props }, ref) {
+    return (
+      <DropdownMenuPrimitive.Separator
+        ref={ref}
+        className={cn("ui-dropdown-separator", className)}
+        {...props}
+      />
+    );
+  },
+);

@@ -106,6 +106,15 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .ui-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes dialog-in { from { opacity: 0; transform: translate(-50%, -48%) scale(.98); } }
+.ui-dropdown-content { z-index: 85; min-width: 230px; max-width: min(320px, calc(100vw - 24px)); padding: 6px; border: 1px solid var(--line); border-radius: 11px; background: #fff; box-shadow: 0 16px 40px rgba(23, 32, 51, .15); animation: fade-in .14s ease; }
+.ui-dropdown-label { display: grid; gap: 2px; padding: 8px 9px 9px; }
+.ui-dropdown-label strong { color: var(--ink); font-size: 13px; }
+.ui-dropdown-label span { max-width: 260px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-dropdown-item { min-height: 38px; display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: 7px; outline: 0; color: var(--ink); font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; }
+.ui-dropdown-item[data-highlighted] { background: var(--soft); }
+.ui-dropdown-item.destructive { color: #b42318; }
+.ui-dropdown-item.destructive[data-highlighted] { background: #fff0f0; }
+.ui-dropdown-separator { height: 1px; margin: 5px; background: var(--line); }
 
 .app-shell { min-height: 100vh; }
 .topbar { height: 72px; background: rgba(255, 255, 255, .92); border-bottom: 1px solid rgba(230, 232, 236, .85); position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px); }
@@ -119,10 +128,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .account-chip { min-height: auto; display: flex; align-items: center; gap: 9px; padding: 4px 7px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font-weight: initial; text-align: left; box-shadow: none; }
 .account-chip:hover { background: var(--soft); }
 .account-chip .avatar { width: 34px; height: 34px; border-radius: 50%; background: #f0f1f3; color: #475467; display: grid; place-items: center; }
-.account-chip > div:last-child { display: grid; max-width: 180px; }
+.account-chip .account-details { display: grid; max-width: 180px; }
 .account-chip strong, .account-chip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .account-chip strong { font-size: 12px; }
 .account-chip span { color: var(--muted); font-size: 10px; }
+.account-chevron { flex: none; color: var(--muted); }
 .app-nav-shell { margin: 0 auto; }
 .app-nav { display: flex; align-items: center; gap: 4px; }
 .app-nav .ui-tabs-trigger { min-height: 34px; padding: 0 11px; }
@@ -200,7 +210,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .report-facts strong { color: var(--ink); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
 .history-report + .history-report { margin-top: 30px; padding-top: 25px; border-top: 1px solid var(--line); }
 .history-report > h3 { margin: 0 0 18px; }
-.page-heading { margin-bottom: 22px; }
+.page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
 .page-heading h1 { margin: 0; color: #111827; font-size: clamp(28px, 3vw, 36px); line-height: 1.15; letter-spacing: -.035em; }
 
 .audit-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, .8fr); gap: 20px; align-items: start; }
@@ -323,7 +333,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 @media (max-width: 900px) {
   .audit-layout { grid-template-columns: 1fr; }
   .setup-panel { order: 2; }
-  .account-chip > div:last-child { display: none; }
+  .account-chip .account-details { display: none; }
   .management-grid.two, .management-grid.scorecard-grid { grid-template-columns: 1fr; }
   .report-facts { grid-template-columns: 1fr 1fr; }
 }
@@ -333,12 +343,14 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .topbar-inner, .page-container, .workspace-view { width: calc(100% - 28px); }
   .brand-lockup .brand-mark { width: 36px; height: 36px; }
   .topbar-actions { gap: 4px; }
-  .account-chip { display: none; }
+  .account-chip { padding: 3px; }
+  .account-chip .account-chevron { display: none; }
   .app-nav-shell { margin: 0; }
   .app-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; width: auto; max-width: none; justify-content: center; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-radius: 0; border-top: 1px solid var(--line); background: rgba(255,255,255,.96); }
   .app-nav .ui-tabs-trigger { flex: 1; max-width: 130px; }
   .page-container { padding: 30px 0 48px; }
-  .page-heading { margin-bottom: 20px; }
+  .page-heading { align-items: flex-start; margin-bottom: 20px; }
+  .page-heading .ui-button { flex: none; }
   .page-heading h1 { font-size: 28px; }
   .flow-panel, .setup-panel { padding: 18px; border-radius: 14px; }
   .dropzone { min-height: 142px; padding: 18px; }

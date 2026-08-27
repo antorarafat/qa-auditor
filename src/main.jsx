@@ -6,6 +6,7 @@ import {
   AudioLines,
   BarChart3,
   Check,
+  ChevronDown,
   ClipboardCheck,
   CloudUpload,
   Eye,
@@ -24,6 +25,8 @@ import {
   UserRound,
   AlertTriangle,
   History,
+  KeyRound,
+  Plus,
   ShieldCheck,
 } from "lucide-react";
 import {
@@ -33,6 +36,12 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   Input,
   Label,
   RadioGroup,
@@ -45,6 +54,7 @@ import {
 } from "./components/ui";
 import { MultiSelect } from "./components/multi-select";
 import { SingleSelect } from "./components/single-select";
+import { LanguageProvider, useLanguage } from "./language";
 import "./index.css";
 
 const lazyView = (name) =>
@@ -57,11 +67,13 @@ const PasswordChange = lazyView("PasswordChange");
 const ReportsView = lazyView("ReportsView");
 const SetupScreen = lazyView("SetupScreen");
 function ViewLoader({ children }) {
+  const language = useLanguage();
   return (
     <React.Suspense
       fallback={
         <div className="loading-screen">
-          <Sparkles size={22} /> Loading…
+          <Sparkles size={22} />
+          {language === "bn" ? "লোড হচ্ছে…" : "Loading…"}
         </div>
       }
     >
@@ -138,6 +150,13 @@ const copy = {
     queued: "Queued",
     processing: "Processing",
     queuePosition: "Queue position: {position}",
+    auditTab: "Audit",
+    reportsTab: "Report",
+    adminPanel: "Admin panel",
+    accountSecurity: "Change password",
+    changeLanguage: "বাংলায় দেখুন",
+    newAudit: "New Audit",
+    profileMenu: "Open profile menu",
   },
   bn: {
     signIn: "আবার স্বাগতম",
@@ -205,6 +224,13 @@ const copy = {
     queued: "কিউতে আছে",
     processing: "প্রসেস হচ্ছে",
     queuePosition: "কিউ পজিশন: {position}",
+    auditTab: "অডিট",
+    reportsTab: "রিপোর্ট",
+    adminPanel: "অ্যাডমিন প্যানেল",
+    accountSecurity: "পাসওয়ার্ড পরিবর্তন",
+    changeLanguage: "View in English",
+    newAudit: "নতুন অডিট",
+    profileMenu: "প্রোফাইল মেনু খুলুন",
   },
 };
 
@@ -239,10 +265,7 @@ const WORD_REPORT_STYLES = `
   .failed-result { color: #b42318; }
 `;
 
-function App() {
-  const [language, setLanguage] = useState(
-    () => localStorage.getItem("qa-language") || "en",
-  );
+function AppContent({ language, toggleLanguage }) {
   const [user, setUser] = useState(null);
   const [loginState, setLoginState] = useState({ loading: true, error: "" });
   const [setupRequired, setSetupRequired] = useState(false);
@@ -271,10 +294,6 @@ function App() {
   const runRef = useRef(0);
   const t = copy[language];
 
-  useEffect(() => {
-    localStorage.setItem("qa-language", language);
-    document.documentElement.lang = language === "bn" ? "bn" : "en";
-  }, [language]);
   useEffect(() => {
     checkSession();
   }, []);
@@ -461,6 +480,21 @@ function App() {
     setSelectedCategories([]);
     setSelectedSubCategoryIds([]);
   }
+  function startNewAudit() {
+    runRef.current += 1;
+    localStorage.removeItem("qa-active-job");
+    setView("audit");
+    setFiles([]);
+    setResult(null);
+    setBusy(false);
+    setStatus("");
+    setDragActive(false);
+    setMode("single");
+    setSelectedCategories([]);
+    setSelectedSubCategoryIds([]);
+    if (inputRef.current) inputRef.current.value = "";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
   function addFiles(incoming) {
     setFiles((current) => {
       const next = [...current];
@@ -612,14 +646,11 @@ function App() {
     await navigator.clipboard.writeText(result?.report || "");
     setStatus(language === "en" ? "Report copied." : "রিপোর্ট কপি হয়েছে।");
   }
-  function toggleLanguage() {
-    setLanguage((current) => (current === "en" ? "bn" : "en"));
-  }
-
   if (loginState.loading)
     return (
       <div className="loading-screen">
-        <Sparkles size={22} /> Loading QA Auditor…
+        <Sparkles size={22} />
+        {language === "bn" ? "QA Auditor লোড হচ্ছে…" : "Loading QA Auditor…"}
       </div>
     );
   if (setupRequired)
@@ -665,53 +696,68 @@ function App() {
             </div>
           </div>
           <Tabs className="app-nav-shell" value={view} onValueChange={setView}>
-            <TabsList className="app-nav" aria-label="Primary navigation">
+            <TabsList className="app-nav" aria-label={t.auditTab}>
               <TabsTrigger value="audit">
-                <ClipboardCheck size={15} /> Audit
+                <ClipboardCheck size={15} /> {t.auditTab}
               </TabsTrigger>
               <TabsTrigger value="reports">
-                <History size={15} /> Reports
+                <History size={15} /> {t.reportsTab}
               </TabsTrigger>
-              {user.role === "admin" && (
-                <TabsTrigger value="admin">
-                  <ShieldCheck size={15} /> Admin
-                </TabsTrigger>
-              )}
             </TabsList>
           </Tabs>
           <div className="topbar-actions">
-            <LanguageToggle language={language} onClick={toggleLanguage} />
-            <Button
-              type="button"
-              variant="ghost"
-              className="account-chip"
-              onClick={() => setView("account")}
-            >
-              <div className="avatar">
-                <UserRound size={16} />
-              </div>
-              <div>
-                <strong>
-                  {user.username || user.name || user.email.split("@")[0]}
-                </strong>
-                <span>{user.email}</span>
-              </div>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={logout}
-              aria-label={t.logout}
-            >
-              <LogOut size={18} />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="account-chip"
+                  aria-label={t.profileMenu}
+                >
+                  <div className="avatar">
+                    <UserRound size={16} />
+                  </div>
+                  <div className="account-details">
+                    <strong>
+                      {user.username || user.name || user.email.split("@")[0]}
+                    </strong>
+                    <span>{user.email}</span>
+                  </div>
+                  <ChevronDown className="account-chevron" size={15} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="profile-menu" align="end">
+                <DropdownMenuLabel>
+                  <strong>
+                    {user.username || user.name || user.email.split("@")[0]}
+                  </strong>
+                  <span>{user.email}</span>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {user.role === "admin" && (
+                  <DropdownMenuItem onSelect={() => setView("admin")}>
+                    <ShieldCheck size={16} /> {t.adminPanel}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={() => setView("account")}>
+                  <KeyRound size={16} /> {t.accountSecurity}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={toggleLanguage}>
+                  <Globe2 size={16} /> {t.changeLanguage}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem destructive onSelect={logout}>
+                  <LogOut size={16} /> {t.logout}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>
       <main className="main-area">
         <ViewLoader>
           {view === "reports" ? (
-            <ReportsView user={user} />
+            <ReportsView user={user} onNewAudit={startNewAudit} />
           ) : view === "admin" && user.role === "admin" ? (
             <AdminView />
           ) : view === "account" ? (
@@ -720,6 +766,9 @@ function App() {
             <div className="page-container">
               <div className="page-heading">
                 <h1>{t.pageTitle}</h1>
+                <Button variant="outline" onClick={startNewAudit}>
+                  <Plus size={16} /> {t.newAudit}
+                </Button>
               </div>
               <div className="audit-layout">
                 <section className="flow-panel">
@@ -1149,6 +1198,23 @@ function toBase64(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function App() {
+  const [language, setLanguage] = useState(
+    () => localStorage.getItem("qa-language") || "en",
+  );
+  useEffect(() => {
+    localStorage.setItem("qa-language", language);
+    document.documentElement.lang = language === "bn" ? "bn" : "en";
+  }, [language]);
+  const toggleLanguage = () =>
+    setLanguage((current) => (current === "en" ? "bn" : "en"));
+  return (
+    <LanguageProvider language={language}>
+      <AppContent language={language} toggleLanguage={toggleLanguage} />
+    </LanguageProvider>
+  );
 }
 
 createRoot(document.getElementById("root")).render(<App />);

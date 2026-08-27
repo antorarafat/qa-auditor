@@ -4,6 +4,12 @@ A secure multi-user call-audit portal with QA Scorecard, Customer Voice, and Adv
 
 The application does not ship with company data, scorecards, API keys, passwords, recordings, or reports.
 
+## User guide
+
+For non-technical QA users, managers, and administrators, see the [QA Auditor User Guide](USERGUIDE.md). It includes step-by-step workflows, role permissions, report filters, re-auditing, and screenshots.
+
+![Reports table](docs/screenshots/reports-table.png)
+
 ## Stored data
 
 - `user`: roles, Argon2id password hashes, and AES-256-GCM encrypted personal API keys

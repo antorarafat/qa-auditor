@@ -91,6 +91,8 @@ const bnCopy = {
   Word: "Word",
   Copy: "কপি",
   User: "ব্যবহারকারী",
+  Manager: "ম্যানেজার",
+  Admin: "অ্যাডমিন",
   Model: "মডেল",
   Reasoning: "রিজনিং",
   "Estimated API cost": "আনুমানিক API খরচ",
@@ -1130,6 +1132,7 @@ function UsersAdmin() {
                   onValueChange={(role) => update(user, "role", role)}
                   options={[
                     { value: "user", label: tr("User") },
+                    { value: "manager", label: tr("Manager") },
                     { value: "admin", label: tr("Admin") },
                   ]}
                 />

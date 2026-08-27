@@ -10,8 +10,11 @@ The application does not ship with company data, scorecards, API keys, passwords
 - `sessions`: hashed browser sessions with automatic expiry
 - `company`, `product_brief`, and `qa_scorecard`: current configuration
 - `report_runs`: complete history for all three modes
+- `report_records`: one filterable record per evaluated call plus stored summaries (timestamp, process, agent, duration, score, CE)
 - `audit_result`: compatible QA columns plus ownership, job, file, and snapshot metadata
 - `analysis_jobs`, `analysis_cache`, `rate_limit_state`, and GridFS `audio_files`: reliable queued analysis
+
+Reports default to month-to-date and support agent, process, score, CE, owner, and text filters. The **Summary** view lets you select stored QA calls and generate one cross-call summary without re-uploading audio; each QA file in a multi-call run is evaluated sequentially and saved independently.
 
 ## First installation with Docker
 

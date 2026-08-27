@@ -590,6 +590,24 @@ test('personal API-key APIs return only masked metadata', async () => {
   assert.equal(response.status, 200); assert.equal(response.body.apiKey.lastFour, '1234'); assert.equal(JSON.stringify(response.body).includes(secret), false);
 });
 
+test('API-key validation has a hard deadline and saves an unverified encrypted key', async () => {
+  const store = fakeStore(); store.users[0].id = 'test-user';
+  store.setApiKey = async (_id, provider, key, status) => ({ configured: true, lastFour: key.slice(-4), status });
+  const app = createApp({
+    dataStore: store,
+    providerClient: fakeProviders(),
+    apiKeyValidationTimeoutMs: 20,
+    apiKeyValidator: async () => new Promise(() => {})
+  });
+  const agent = request.agent(app); await login(agent);
+  const startedAt = Date.now();
+  const response = await agent.put('/api/account/api-keys/openai').send({ apiKey: 'provider-key-that-does-not-finish-9876' });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.apiKey.status, 'unverified');
+  assert.match(response.body.warning, /could not verify/i);
+  assert.ok(Date.now() - startedAt < 500);
+});
+
 test('legacy scorecards hydrate every category and row for the structured editor', () => {
   const item = scorecardForEditor({ id: 'inbound', name: 'Inbound', detail: RUBRIC });
   assert.equal(item.definition.overallTotal, 10);

@@ -38,6 +38,8 @@ import { useLanguage } from "./language";
 
 const bnCopy = {
   "The request could not be completed.": "অনুরোধটি সম্পন্ন করা যায়নি।",
+  "The request timed out. Please try again.":
+    "অনুরোধের সময় শেষ হয়েছে। আবার চেষ্টা করুন।",
   "Set up QA Auditor": "QA Auditor সেটআপ করুন",
   "Create the first administrator. The setup token comes from your server’s .env file and works only once.":
     "প্রথম অ্যাডমিন তৈরি করুন। সেটআপ টোকেনটি সার্ভারের .env ফাইলে রয়েছে এবং একবারই ব্যবহার করা যাবে।",
@@ -265,24 +267,36 @@ function useTr() {
 }
 
 async function api(url, options = {}) {
-  const response = await fetch(url, {
-    credentials: "same-origin",
-    ...options,
-    headers: {
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {}),
-    },
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(
-      data.error || "The request could not be completed.",
-    );
-    error.status = response.status;
-    error.code = data.errorCode;
+  const { timeoutMs = 30000, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      ...fetchOptions,
+      signal: controller.signal,
+      headers: {
+        ...(fetchOptions.body ? { "Content-Type": "application/json" } : {}),
+        ...(fetchOptions.headers || {}),
+      },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(
+        data.error || "The request could not be completed.",
+      );
+      error.status = response.status;
+      error.code = data.errorCode;
+      throw error;
+    }
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError")
+      throw new Error("The request timed out. Please try again.");
     throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  return data;
 }
 function body(method, value) {
   return { method, body: JSON.stringify(value) };
@@ -496,7 +510,7 @@ export function AccountView({ user, onSignedOut }) {
     try {
       const data = await api(
         `/api/account/api-keys/${provider}`,
-        body("PUT", { apiKey }),
+        { ...body("PUT", { apiKey }), timeoutMs: 15000 },
       );
       setKeys((current) => ({ ...current, [provider]: data.apiKey }));
       setApiKey("");
@@ -599,7 +613,7 @@ export function AccountView({ user, onSignedOut }) {
               />
               <Notice
                 message={message}
-                error={/rejected|could not|invalid/i.test(message)}
+                error={/rejected|could not|invalid|timed out/i.test(message)}
               />
               <Button disabled={busy}>
                 {busy ? tr("Checking…") : tr("Validate and save")}

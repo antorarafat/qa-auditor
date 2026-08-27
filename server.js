@@ -476,10 +476,24 @@ function createApp(options = {}) {
   app.get('/api/account/api-keys', requireAuth, requireReady, (req, res) => res.json({ apiKeys: req.currentUser.apiKeyStatus || {} }));
   app.get('/api/account/api-keys/:provider', requireAuth, requireReady, (req, res) => { const provider = String(req.params.provider || '').toLowerCase(); if (!['gemini', 'openai'].includes(provider)) return res.status(400).json({ error: 'Unsupported provider.' }); return res.json({ apiKey: req.currentUser.apiKeyStatus?.[provider] || { configured: false } }); });
   async function validateProviderKey(provider, key) {
-    if (options.apiKeyValidator) return options.apiKeyValidator(provider, key);
-    const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 10000);
-    try { const response = provider === 'gemini' ? await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key }, signal: controller.signal }) : await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` }, signal: controller.signal }); if (response.status === 401 || response.status === 403) return { valid: false, status: 'invalid' }; return { valid: response.ok ? true : null, status: response.ok ? 'verified' : 'unverified' }; }
-    catch { return { valid: null, status: 'unverified' }; } finally { clearTimeout(timeout); }
+    const timeoutMs = Math.max(250, Number(options.apiKeyValidationTimeoutMs || 8000));
+    const controller = new AbortController();
+    let timeout;
+    const probe = async () => {
+      if (options.apiKeyValidator) return options.apiKeyValidator(provider, key, { signal: controller.signal });
+      const response = provider === 'gemini'
+        ? await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key }, signal: controller.signal })
+        : await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` }, signal: controller.signal });
+      if (response.status === 401 || response.status === 403) return { valid: false, status: 'invalid' };
+      return { valid: response.ok ? true : null, status: response.ok ? 'verified' : 'unverified' };
+    };
+    try {
+      return await Promise.race([
+        probe(),
+        new Promise(resolve => { timeout = setTimeout(() => { controller.abort(); resolve({ valid: null, status: 'unverified' }); }, timeoutMs); })
+      ]);
+    } catch { return { valid: null, status: 'unverified' }; }
+    finally { clearTimeout(timeout); }
   }
   app.put('/api/account/api-keys/:provider', requireSameOrigin, requireAuth, requireReady, jsonSmall, async (req, res) => {
     const provider = String(req.params.provider || '').toLowerCase(); const apiKey = String(req.body?.apiKey || '').trim(); if (!['gemini', 'openai'].includes(provider) || !apiKey || apiKey.length > 512) return res.status(400).json({ error: 'Enter a valid provider API key.' });

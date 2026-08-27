@@ -60,7 +60,7 @@ function safeEqual(left, right) { const a = Buffer.from(String(left || '')); con
 
 function publicUser(user) {
   const providers = user.providers || [user.geminiKey ? 'gemini' : null, user.openaiKey ? 'openai' : null].filter(Boolean);
-  return { id: user.id || String(user._id || ''), email: user.email, username: user.username || user.name, name: user.username || user.name, role: user.role || 'user', status: user.status || 'active', mustChangePassword: Boolean(user.mustChangePassword), companyName: user.companyName || 'QA Auditor', providers, apiKeyStatus: user.apiKeyStatus || Object.fromEntries(['gemini', 'openai'].map(provider => [provider, { configured: providers.includes(provider) }])) };
+  return { id: user.id || String(user._id || ''), email: user.email, username: user.username || user.name, name: user.username || user.name, role: ['admin', 'manager'].includes(user.role) ? user.role : 'user', status: user.status || 'active', mustChangePassword: Boolean(user.mustChangePassword), companyName: user.companyName || 'QA Auditor', providers, apiKeyStatus: user.apiKeyStatus || Object.fromEntries(['gemini', 'openai'].map(provider => [provider, { configured: providers.includes(provider) }])) };
 }
 function createAnalysisCache(config = {}) {
   const ttlMs = config.ttlMs || envNumber('AI_CACHE_TTL_MS', 6 * 60 * 60 * 1000); const maxEntries = config.maxEntries || envNumber('AI_CACHE_MAX_ENTRIES', 100); const entries = new Map();
@@ -755,18 +755,19 @@ async function runAnalysis({ dataStore, providerClient, memoryCache, templateDir
   return responseBody;
 }
 
-function createAnalysisQueue({ dataStore, handler, minStartIntervalMs = envNumber('AI_MIN_START_INTERVAL_MS', 60000), cooldownMs = envNumber('AI_RATE_LIMIT_COOLDOWN_MS', 60000), workerLeaseMs = envNumber('AI_WORKER_LEASE_MS', 30 * 60 * 1000), pollMs = 2000 }) {
-  const workerId = crypto.randomUUID(); let running = false; let stopped = false; let timer = null;
-  function schedule(delay = pollMs) { if (stopped || timer) return; timer = setTimeout(() => { timer = null; drain().catch(error => { console.error('Analysis queue failed:', error.message); schedule(); }); }, delay); timer.unref?.(); }
-  async function drain() {
-    if (running || stopped) return;
-    const leaseUntil = dataStore.acquireWorkerLease ? await dataStore.acquireWorkerLease(workerId, workerLeaseMs) : new Date(Date.now() + workerLeaseMs);
+function createAnalysisQueue({ dataStore, handler, minStartIntervalMs = envNumber('AI_MIN_START_INTERVAL_MS', 60000), cooldownMs = envNumber('AI_RATE_LIMIT_COOLDOWN_MS', 60000), workerLeaseMs = envNumber('AI_WORKER_LEASE_MS', 30 * 60 * 1000), pollMs = 2000, concurrency = envNumber('AI_WORKER_CONCURRENCY', 1) }) {
+  const workerId = crypto.randomUUID(); const workerCount = Math.min(Math.max(Number(concurrency) || 1, 1), 32); let active = 0; let stopped = false; let timer = null;
+  function schedule(delay = pollMs) { if (stopped || timer) return; timer = setTimeout(() => { timer = null; for (let slot = 0; slot < workerCount; slot += 1) drain(slot).catch(error => { console.error('Analysis queue failed:', error.message); schedule(); }); }, delay); timer.unref?.(); }
+  async function drain(slot = 0) {
+    if (active >= workerCount || stopped) return;
+    active += 1;
+    const leaseOwner = `${workerId}:${slot}`;
+    const leaseUntil = dataStore.acquireWorkerLease ? await dataStore.acquireWorkerLease(leaseOwner, workerLeaseMs, `analysis-worker-${slot}`) : new Date(Date.now() + workerLeaseMs);
     if (!leaseUntil) return schedule();
     let job;
     try { await dataStore.recoverJobs(); job = await dataStore.claimNextJob(workerId, leaseUntil); }
-    catch (error) { if (dataStore.releaseWorkerLease) await dataStore.releaseWorkerLease(workerId).catch(() => {}); throw error; }
-    if (!job) { if (dataStore.releaseWorkerLease) await dataStore.releaseWorkerLease(workerId); return schedule(); }
-    running = true;
+    catch (error) { if (dataStore.releaseWorkerLease) await dataStore.releaseWorkerLease(leaseOwner, `analysis-worker-${slot}`).catch(() => {}); active -= 1; throw error; }
+    if (!job) { if (dataStore.releaseWorkerLease) await dataStore.releaseWorkerLease(leaseOwner, `analysis-worker-${slot}`); active -= 1; return schedule(); }
     try {
       const rateKey = job.rateKey || job.provider || 'gemini'; const state = await dataStore.getRateState(rateKey); const delay = Math.max(0, new Date(state?.nextAllowedAt || 0).getTime() - Date.now());
       if (delay) await new Promise(resolve => setTimeout(resolve, delay));
@@ -779,7 +780,7 @@ function createAnalysisQueue({ dataStore, handler, minStartIntervalMs = envNumbe
       if (safe.errorCode === 'rate_limited') await dataStore.setCooldownUntil(new Date(Date.now() + Math.max(cooldownMs, safe.retryAfterMs || 0)), job.rateKey || job.provider || 'gemini').catch(() => {});
       await dataStore.failJob(job.jobId, safe);
       console.error(`Analysis job ${job.jobId} failed:`, error.message);
-    } finally { if (dataStore.releaseWorkerLease) await dataStore.releaseWorkerLease(workerId).catch(() => {}); running = false; schedule(0); }
+    } finally { if (dataStore.releaseWorkerLease) await dataStore.releaseWorkerLease(leaseOwner, `analysis-worker-${slot}`).catch(() => {}); active -= 1; schedule(0); }
   }
   return {
     async start() { schedule(0); },
@@ -887,6 +888,7 @@ function createApp(options = {}) {
   });
   app.get('/api/reports/:id', requireAuth, requireReady, async (req, res) => { try { const report = await dataStore.getReport(req.currentUser, req.params.id); return report ? res.json({ report }) : res.status(404).json({ error: 'Report was not found.' }); } catch { return res.status(503).json({ error: 'The report is temporarily unavailable.' }); } });
 
+  app.put('/api/admin/users/:id/role', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res, next) => { if (req.body?.role !== 'manager') return next(); if (String(req.currentUser.id) === String(req.params.id)) return res.status(400).json({ error: 'Ask another administrator to change your role.' }); try { await dataStore.setUserRole(req.params.id, 'manager'); return res.json({ ok: true }); } catch (error) { return res.status(400).json({ error: error.message }); } });
   app.get('/api/admin/users', requireAuth, requireReady, requireAdmin, async (req, res) => res.json({ users: (await dataStore.listUsers()).map(publicUser) }));
   app.post('/api/admin/users', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res) => { try { const user = await dataStore.createUser({ email: validateEmail(req.body?.email), username: validateUsername(req.body?.username), password: String(req.body?.password || '') }); return res.status(201).json({ user: publicUser(user) }); } catch (error) { return res.status(error.code === 11000 ? 409 : error.statusCode || 400).json({ error: error.code === 11000 ? 'That email or username is already in use.' : error.message }); } });
   app.put('/api/admin/users/:id/role', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res) => { const role = req.body?.role === 'admin' ? 'admin' : req.body?.role === 'user' ? 'user' : ''; if (!role) return res.status(400).json({ error: 'Invalid role.' }); if (String(req.currentUser.id) === String(req.params.id)) return res.status(400).json({ error: 'Ask another administrator to change your role.' }); try { await dataStore.setUserRole(req.params.id, role); return res.json({ ok: true }); } catch (error) { return res.status(400).json({ error: error.message }); } });

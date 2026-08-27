@@ -196,6 +196,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .report-table-wrap { overflow-x: auto; }
 .report-table { width: 100%; border-collapse: collapse; min-width: 860px; }
 .report-table th, .report-table td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.report-table th, .report-table td { vertical-align: middle; }
+.report-table th:nth-last-child(-n+4), .report-table td:nth-last-child(-n+4) { text-align: center; }
+.report-action-cell { width: 56px; }
 .report-table th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .report-table tbody tr:hover { background: #fafafa; }
 .report-table tbody tr:nth-child(odd) { background: #f8fafc; }

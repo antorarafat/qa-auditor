@@ -7,6 +7,7 @@ import {
   FileText,
   FileDown,
   KeyRound,
+  Eye,
   Plus,
   RefreshCw,
   Search,
@@ -978,7 +979,7 @@ export function ReportsView({ user, onNewAudit }) {
       <Notice message={message} error />
       <div className="history-list report-table-wrap">
         <table className="report-table"><thead><tr>{reportTab === "summary" && <th>Select</th>}<th>Timestamp</th><th>Mode</th><th>Agent</th><th>Process</th><th>Duration</th><th>Score</th><th>CE</th><th> </th></tr></thead><tbody>
-        {data.items.map((item) => <tr key={item.id}>{reportTab === "summary" && <td><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => setSelectedIds((ids) => ids.includes(item.id) ? ids.filter((id) => id !== item.id) : [...ids, item.id])} disabled={item.status !== "success"} /></td>}<td>{dateText(item.timestamp, language)}</td><td>{modeName(item.mode, tr)}</td><td>{item.agentName || "—"}</td><td>{item.process || "—"}</td><td>{item.durationSeconds != null ? `${Math.round(item.durationSeconds)}s` : "—"}</td><td>{item.score != null ? `${item.ce ? 0 : item.score}${item.maximum ? ` / ${item.maximum}` : ""}` : "—"}</td><td>{item.ce ? <span className="ce-badge">CE</span> : "—"}</td><td><Button variant="ghost" onClick={() => openReport(item.reportId)} aria-label="Open report">◉</Button></td></tr>)}
+        {data.items.map((item) => <tr key={item.id}>{reportTab === "summary" && <td><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => setSelectedIds((ids) => ids.includes(item.id) ? ids.filter((id) => id !== item.id) : [...ids, item.id])} disabled={item.status !== "success"} /></td>}<td>{dateText(item.timestamp, language)}</td><td>{modeName(item.mode, tr)}</td><td>{item.agentName || "—"}</td><td>{item.process || "—"}</td><td>{item.durationSeconds != null ? `${Math.round(item.durationSeconds)}s` : "—"}</td><td>{item.score != null ? `${item.ce ? 0 : item.score}${item.maximum ? ` / ${item.maximum}` : ""}` : "—"}</td><td>{item.ce ? <span className="ce-badge">CE</span> : "—"}</td><td className="report-action-cell"><Button variant="ghost" size="icon" onClick={() => openReport(item.reportId)} aria-label="Open report"><Eye size={17} /></Button></td></tr>)}
         </tbody></table>
         {!busy && !data.items.length && (
           <div className="empty-state">

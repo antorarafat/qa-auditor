@@ -35,6 +35,7 @@ import {
   Textarea,
 } from "./components/ui";
 import { useLanguage } from "./language";
+import { MultiSelect } from "./components/multi-select";
 
 const bnCopy = {
   "The request could not be completed.": "অনুরোধটি সম্পন্ন করা যায়নি।",
@@ -122,6 +123,10 @@ const bnCopy = {
   "All users": "সব ব্যবহারকারী",
   "All agents": "সব এজেন্ট",
   "All processes": "সব প্রক্রিয়া",
+  "Search agents": "এজেন্ট খুঁজুন",
+  "Search processes": "প্রক্রিয়া খুঁজুন",
+  "No results": "কোনো ফল নেই",
+  "{count} selected": "{count}টি নির্বাচিত",
   "Calls evaluated": "মূল্যায়িত কল",
   "Average QA score": "গড় QA স্কোর",
   "AHT": "AHT",
@@ -688,11 +693,13 @@ export function ReportsView({ user, onNewAudit }) {
   const [selected, setSelected] = useState(null);
   const [owners, setOwners] = useState([]);
   const [filters, setFilters] = useState({
-    mode: "",
+    mode: [],
     search: "",
-    ce: "",
-    ownerUserId: "",
-    parameter: "",
+    ce: [],
+    ownerUserId: [],
+    parameter: [],
+    agentName: [],
+    process: [],
     from: `${today.slice(0, 8)}01`,
     to: today,
     minScore: "",
@@ -707,7 +714,7 @@ export function ReportsView({ user, onNewAudit }) {
       const params = new URLSearchParams({ limit: "20" });
       Object.entries(filters).forEach(
         ([key, value]) =>
-          value && params.set(key, key === "to" ? `${value}T23:59:59` : value),
+          value && params.set(key, Array.isArray(value) ? value.join(",") : key === "to" ? `${value}T23:59:59` : value),
       );
       if (reportTab === "summary") params.set("mode", "single");
       if (cursor) params.set("cursor", cursor);
@@ -882,58 +889,37 @@ export function ReportsView({ user, onNewAudit }) {
               }
             />
           </div>
-          <Select
-            aria-label="Agent name"
-            value={filters.agentName || "all"}
-            onValueChange={(agentName) => setFilters({ ...filters, agentName: agentName === "all" ? "" : agentName })}
-            options={[{ value: "all", label: tr("All agents") }, ...options.agents.map((value) => ({ value, label: value }))]}
-          />
-          <Select
-            aria-label="Process"
-            value={filters.process || "all"}
-            onValueChange={(process) => setFilters({ ...filters, process: process === "all" ? "" : process })}
-            options={[{ value: "all", label: tr("All processes") }, ...options.processes.map((value) => ({ value, label: value }))]}
-          />
-          <Select
+          <MultiSelect id="report-agents" value={filters.agentName} onChange={(agentName) => setFilters({ ...filters, agentName })} options={options.agents} placeholder={tr("All agents")} searchPlaceholder={tr("Search agents")} emptyText={tr("No results") } selectedText={tr("{count} selected")} clearText={tr("Clear selections")} />
+          <MultiSelect id="report-processes" value={filters.process} onChange={(process) => setFilters({ ...filters, process })} options={options.processes} placeholder={tr("All processes")} searchPlaceholder={tr("Search processes")} emptyText={tr("No results") } selectedText={tr("{count} selected")} clearText={tr("Clear selections")} />
+          <MultiSelect
             aria-label={tr("Report mode")}
-            value={reportTab === "summary" ? "single" : (filters.mode || "all")}
+            value={reportTab === "summary" ? ["single"] : filters.mode}
             placeholder={tr("All modes")}
-            onValueChange={(mode) =>
-              setFilters({ ...filters, mode: mode === "all" ? "" : mode })
-            }
+            onChange={(mode) => setFilters({ ...filters, mode })}
             options={[
-              { value: "all", label: tr("All modes") },
               { value: "single", label: tr("QA scorecard") },
               { value: "voice", label: tr("Customer voice") },
               { value: "coaching", label: tr("Advisor coaching") },
+              { value: "summary", label: tr("Summary") },
             ]}
           />
-          <Select
+          <MultiSelect
             aria-label={tr("CE status")}
-            value={filters.ce || "all"}
+            value={filters.ce}
             placeholder={tr("All CE statuses")}
-            onValueChange={(ce) =>
-              setFilters({ ...filters, ce: ce === "all" ? "" : ce })
-            }
+            onChange={(ce) => setFilters({ ...filters, ce })}
             options={[
-              { value: "all", label: tr("All CE statuses") },
               { value: "true", label: tr("Has CE") },
               { value: "false", label: tr("Non-CE") },
             ]}
           />
-          {user.role === "admin" && (
-            <Select
+          {(user.role === "admin" || user.role === "manager") && (
+            <MultiSelect
               aria-label={tr("Report owner")}
-              value={filters.ownerUserId || "all"}
+              value={filters.ownerUserId}
               placeholder={tr("All users")}
-              onValueChange={(ownerUserId) =>
-                setFilters({
-                  ...filters,
-                  ownerUserId: ownerUserId === "all" ? "" : ownerUserId,
-                })
-              }
+              onChange={(ownerUserId) => setFilters({ ...filters, ownerUserId })}
               options={[
-                { value: "all", label: tr("All users") },
                 ...owners.map((owner) => ({
                   value: owner.id,
                   label: owner.username,

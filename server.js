@@ -15,7 +15,7 @@ const DIST_INDEX_PATH = path.join(DIST_DIR, 'index.html');
 const TEMPLATE_DIR = process.env.TEMPLATE_DIR || path.join(ROOT, 'templates');
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
-const DEFAULT_OPENAI_MODELS = ['gpt-4o-audio-preview', 'gpt-4o-mini-audio-preview'];
+const DEFAULT_OPENAI_MODELS = ['gpt-audio-1.5'];
 const DEFAULT_GEMINI_DEADLINE_MS = 10 * 60 * 1000;
 const DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS = 590 * 1000;
 const DEFAULT_GEMINI_RETRY_DELAY_MS = 15 * 1000;
@@ -188,7 +188,7 @@ function createProviderClient(config = {}) {
   }
   async function callOpenAI(apiKey, audioFiles, prompt, schema, withMeta = false) {
     const content = [{ type: 'text', text: `${prompt}\n\nReturn JSON only matching this schema: ${JSON.stringify(schema)}` }, ...audioFiles.map(file => ({ type: 'input_audio', input_audio: { data: file.data, format: /wav/i.test(`${file.mimeType} ${file.name}`) ? 'wav' : 'mp3' } }))]; let lastError = 'No supported OpenAI model responded.';
-    for (const model of openaiModels) { const response = await fetchImpl('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, modalities: ['text'], response_format: { type: 'json_object' }, messages: [{ role: 'user', content }] }) }); const data = await response.json().catch(() => ({})); if (response.ok) { const text = data.choices?.[0]?.message?.content; if (text) { const value = parseJsonText(text); return withMeta ? { value, model } : value; } lastError = 'OpenAI returned no structured result.'; continue; } const message = String(data.error?.message || 'OpenAI request failed'); console.error(`OpenAI model ${model} returned HTTP ${response.status}: ${message.replace(/\s+/g, ' ').slice(0, 300)}`); if (response.status === 401 || response.status === 403) throw providerError('OpenAI credential rejected.', 'invalid_credentials', false, response.status); if (response.status === 429) { lastError = message; continue; } if (response.status === 404 || response.status >= 500 || /not found|deprecated|not supported|model/i.test(message)) { lastError = message; continue; } throw providerError(`OpenAI request rejected (HTTP ${response.status}).`, 'request_rejected', false, response.status); }
+    for (const model of openaiModels) { const response = await fetchImpl('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, modalities: ['text'], messages: [{ role: 'user', content }] }) }); const data = await response.json().catch(() => ({})); if (response.ok) { const text = data.choices?.[0]?.message?.content; if (text) { const value = parseJsonText(text); return withMeta ? { value, model } : value; } lastError = 'OpenAI returned no structured result.'; continue; } const message = String(data.error?.message || 'OpenAI request failed'); console.error(`OpenAI model ${model} returned HTTP ${response.status}: ${message.replace(/\s+/g, ' ').slice(0, 300)}`); if (response.status === 401 || response.status === 403) throw providerError('OpenAI credential rejected.', 'invalid_credentials', false, response.status); if (response.status === 429) { lastError = message; continue; } if (response.status === 404 || response.status >= 500 || /not found|deprecated|not supported|model/i.test(message)) { lastError = message; continue; } throw providerError(`OpenAI request rejected (HTTP ${response.status}).`, 'request_rejected', false, response.status); }
     throw providerError(lastError, /quota|rate limit/i.test(lastError) ? 'rate_limited' : 'provider_unavailable', true);
   }
   async function callOpenAIMarkdown(apiKey, audioFiles, prompt, withMeta = false) {
@@ -478,14 +478,32 @@ function createApp(options = {}) {
   async function validateProviderKey(provider, key) {
     const timeoutMs = Math.max(250, Number(options.apiKeyValidationTimeoutMs || 8000));
     const controller = new AbortController();
+    const validationFetch = options.apiKeyValidationFetch || fetch;
     let timeout;
     const probe = async () => {
       if (options.apiKeyValidator) return options.apiKeyValidator(provider, key, { signal: controller.signal });
-      const response = provider === 'gemini'
-        ? await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key }, signal: controller.signal })
-        : await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` }, signal: controller.signal });
-      if (response.status === 401 || response.status === 403) return { valid: false, status: 'invalid' };
-      return { valid: response.ok ? true : null, status: response.ok ? 'verified' : 'unverified' };
+      if (provider === 'gemini') {
+        const response = await validationFetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': key }, signal: controller.signal });
+        if (response.status === 401 || response.status === 403) return { valid: false, status: 'invalid' };
+        return { valid: response.ok ? true : null, status: response.ok ? 'verified' : 'unverified' };
+      }
+      const modelsResponse = await validationFetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` }, signal: controller.signal });
+      if (modelsResponse.status === 401) return { valid: false, status: 'invalid' };
+      if (modelsResponse.ok) return { valid: true, status: 'verified' };
+      if (modelsResponse.status !== 403) return { valid: null, status: 'unverified' };
+
+      // Restricted project keys may be allowed to run audits while intentionally
+      // lacking api.model.read. An empty request verifies Chat Completions access
+      // without running inference or consuming tokens.
+      const chatResponse = await validationFetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: '{}',
+        signal: controller.signal
+      });
+      if (chatResponse.status === 400 || chatResponse.ok) return { valid: true, status: 'verified' };
+      if (chatResponse.status === 401 || chatResponse.status === 403) return { valid: false, status: 'invalid' };
+      return { valid: null, status: 'unverified' };
     };
     try {
       return await Promise.race([

@@ -344,6 +344,23 @@ test('plain Markdown Gemini calls omit the structured-output schema', async () =
   assert.equal('responseJsonSchema' in requestBody.generationConfig, false);
 });
 
+test('OpenAI audio calls use gpt-audio-1.5 without unsupported response_format', async () => {
+  const requests = [];
+  const provider = createProviderClient({
+    openaiModels: ['gpt-audio-1.5'],
+    fetchImpl: async (_url, options) => {
+      requests.push(JSON.parse(options.body));
+      return { status: 200, ok: true, async json() { return { choices: [{ message: { content: '{"ok":true}' } }] }; } };
+    }
+  });
+  const value = await provider.callStructured('openai', 'secret', [{ name: 'call.wav', mimeType: 'audio/wav', data: 'AAAA' }], 'Return JSON.', { type: 'object' });
+  assert.deepEqual(value, { ok: true });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].model, 'gpt-audio-1.5');
+  assert.equal('response_format' in requests[0], false);
+  assert.equal(requests[0].messages[0].content[1].type, 'input_audio');
+});
+
 test('QA Markdown falls back once per configured model without retrying a full round', async () => {
   let requests = 0;
   const client = createProviderClient({
@@ -588,6 +605,42 @@ test('personal API-key APIs return only masked metadata', async () => {
   const app = createApp({ dataStore: store, providerClient: fakeProviders(), apiKeyValidator: async () => ({ valid: true, status: 'verified' }) }); const agent = request.agent(app); await login(agent);
   const secret = 'personal-provider-key-1234'; const response = await agent.put('/api/account/api-keys/gemini').send({ apiKey: secret });
   assert.equal(response.status, 200); assert.equal(response.body.apiKey.lastFour, '1234'); assert.equal(JSON.stringify(response.body).includes(secret), false);
+});
+
+test('restricted OpenAI keys validate through Chat Completions without model-list scope', async () => {
+  const store = fakeStore(); store.users[0].id = 'test-user';
+  store.setApiKey = async (_id, provider, key, status) => ({ configured: true, lastFour: key.slice(-4), status });
+  const requests = [];
+  const validationFetch = async (url, options = {}) => {
+    requests.push({ url, method: options.method || 'GET', body: options.body });
+    if (url.endsWith('/v1/models')) return { status: 403, ok: false };
+    if (url.endsWith('/v1/chat/completions')) return { status: 400, ok: false };
+    throw new Error('Unexpected validation URL');
+  };
+  const app = createApp({ dataStore: store, providerClient: fakeProviders(), apiKeyValidationFetch: validationFetch });
+  const agent = request.agent(app); await login(agent);
+  const secret = 'restricted-openai-project-key-4321';
+  const response = await agent.put('/api/account/api-keys/openai').send({ apiKey: secret });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.apiKey.status, 'verified');
+  assert.deepEqual(requests.map(item => [item.method, item.url, item.body]), [
+    ['GET', 'https://api.openai.com/v1/models', undefined],
+    ['POST', 'https://api.openai.com/v1/chat/completions', '{}']
+  ]);
+});
+
+test('OpenAI key validation still rejects confirmed authentication failures', async () => {
+  const store = fakeStore(); store.users[0].id = 'test-user';
+  store.setApiKey = async () => { throw new Error('invalid key must not be stored'); };
+  const app = createApp({
+    dataStore: store,
+    providerClient: fakeProviders(),
+    apiKeyValidationFetch: async () => ({ status: 401, ok: false })
+  });
+  const agent = request.agent(app); await login(agent);
+  const response = await agent.put('/api/account/api-keys/openai').send({ apiKey: 'invalid-openai-key-0000' });
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /rejected/i);
 });
 
 test('API-key validation has a hard deadline and saves an unverified encrypted key', async () => {

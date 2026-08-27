@@ -156,6 +156,7 @@ const copy = {
     accountSecurity: "Change password",
     changeLanguage: "বাংলায় দেখুন",
     newAudit: "New Audit",
+    reAudit: "Re-audit",
     profileMenu: "Open profile menu",
     modelUsed: "Models",
     reasoningUsed: "Reasoning",
@@ -234,6 +235,7 @@ const copy = {
     accountSecurity: "পাসওয়ার্ড পরিবর্তন",
     changeLanguage: "View in English",
     newAudit: "নতুন অডিট",
+    reAudit: "আবার অডিট করুন",
     profileMenu: "প্রোফাইল মেনু খুলুন",
     modelUsed: "ব্যবহৃত মডেল",
     reasoningUsed: "রিজনিং",
@@ -582,7 +584,7 @@ function AppContent({ language, toggleLanguage }) {
     }
   }
 
-  async function analyze() {
+  async function analyze(forceFresh = false) {
     if (!files.length) return setStatus(t.noFiles);
     if (!providers.includes(provider)) return setStatus(t.noProvider);
     if (mode !== "voice" && !parameter) return setStatus(t.noParameter);
@@ -610,6 +612,7 @@ function AppContent({ language, toggleLanguage }) {
           parameter,
           categories: selectedCategories,
           productSelections,
+          forceFresh,
           audioFiles,
         }),
       });
@@ -1045,6 +1048,9 @@ function AppContent({ language, toggleLanguage }) {
                     <div className="report-actions">
                       <Button variant="outline" size="sm" onClick={exportPdf}>
                         <FileDown size={15} /> {t.downloadPdf}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => analyze(true)} disabled={busy || !files.length}>
+                        <RefreshCw size={15} /> {t.reAudit}
                       </Button>
                       <Button variant="outline" size="sm" onClick={exportWord}>
                         <FileText size={15} /> {t.downloadWord}

@@ -530,7 +530,7 @@ function normalizeAnalysisInput(body) {
   const categories = [...new Set((Array.isArray(body?.categories) ? body.categories : []).map(item => String(item || '').trim()).filter(Boolean))];
   const selections = (Array.isArray(body?.productSelections) ? body.productSelections : []).map(item => ({ category: String(item?.category || '').trim(), subCategory: String(item?.subCategory || '').trim() })).filter(item => item.category && item.subCategory);
   if (categories.length > 50 || selections.length > 200 || categories.some(item => item.length > 300) || selections.some(item => item.category.length > 300 || item.subCategory.length > 500)) throw Object.assign(new Error('Invalid product selection.'), { statusCode: 400 });
-  return { provider, mode, parameter: String(body?.parameter || '').trim(), categories, selections };
+  return { provider, mode, parameter: String(body?.parameter || '').trim(), categories, selections, forceFresh: body?.forceFresh === true };
 }
 
 async function prepareAnalysis(dataStore, user, input, audioFiles, templateDir) {
@@ -661,7 +661,7 @@ async function runOpenAiAnalysis({ dataStore, providerClient }, user, input, aud
 
 async function runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, input, audioFiles, runContext = {}) {
   const prepared = await prepareAnalysis(dataStore, user, input, audioFiles, templateDir);
-  const cached = await cacheGet(dataStore, memoryCache, prepared.cacheKey);
+  const cached = input.forceFresh ? null : await cacheGet(dataStore, memoryCache, prepared.cacheKey);
   if (cached) return cachedAnalysisResponse(cached);
   const timestamp = new Date().toISOString(); const evaluationDate = timestamp.slice(0, 10); const jobId = runContext.jobId || crypto.randomUUID(); let responseBody; let actualModel = '';
   if (input.provider === 'openai') {
@@ -916,7 +916,7 @@ function createApp(options = {}) {
       const user = await dataStore.findByEmail(req.session.email, { includeSecrets: true }); if (!user || user.active === false || user.status === 'inactive') return res.status(401).json({ error: 'Session is no longer valid.' });
       const prepared = await prepareAnalysis(dataStore, user, input, audioFiles, templateDir);
       if (input.mode !== 'voice') await setActiveParameter(req.sessionToken, prepared.parameter);
-      const cached = await cacheGet(dataStore, memoryCache, prepared.cacheKey);
+      const cached = input.forceFresh ? null : await cacheGet(dataStore, memoryCache, prepared.cacheKey);
       if (cached) return res.json(cachedAnalysisResponse(cached));
       if (!queue) return res.json(await runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, input, audioFiles, { jobId: crypto.randomUUID() }));
       const dedupeKey = analysisDedupeKey(user.email, input, audioFiles); const active = await dataStore.findActiveJob(user.email, dedupeKey);

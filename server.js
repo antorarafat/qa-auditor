@@ -7,7 +7,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const pipeline = require('./lib/audit-pipeline');
 const { createMongoStore } = require('./lib/mongo-store');
-const { englishLabel, enrichAudioDurations } = require('./lib/reporting');
+const { englishLabel, agentLabelFromReport, enrichAudioDurations } = require('./lib/reporting');
 
 const ROOT = __dirname;
 const INDEX_PATH = path.join(ROOT, '10ms-qa-audit-portal.html');
@@ -683,7 +683,7 @@ async function runAnalysis({ dataStore, providerClient, memoryCache, templateDir
         for (const file of audioFiles) {
           const result = parsed.find(value => value.fileName === file.name);
           if (!result) { items.push({ kind: 'call', fileName: file.name, status: 'failed', error: 'The provider response did not contain a report for this call.', errorCode: 'report_parse', retryable: true }); continue; }
-          result.fileName = file.name; result.agentName = englishLabel(result.agentName); result.durationSeconds = file.durationSeconds || null; results.push(result);
+          result.fileName = file.name; result.agentName = agentLabelFromReport(result.agentName, result.markdown); result.durationSeconds = file.durationSeconds || null; results.push(result);
           items.push({ kind: 'call', fileName: file.name, status: 'success', markdown: result.markdown, score: result.finalScore, maximum: result.maximum, ce: result.ceDetected, agentName: result.agentName, durationSeconds: result.durationSeconds });
           if (result.storageEligible) await dataStore.appendAuditResults([pipeline.auditResultRowFromMarkdown(result, prepared.parameter, timestamp)], { ownerUserId: user.id, ownerEmail: user.email, jobId, files: [file], companyName: user.companyName, parameter: prepared.parameter, process: prepared.parameter, products: prepared.products, model: '' });
         }
@@ -704,7 +704,7 @@ async function runAnalysis({ dataStore, providerClient, memoryCache, templateDir
         const model = providerResult.model || ''; if (model) models.push(model);
         const parsed = pipeline.parseQaMarkdownReport(providerResult.value, [file.name], prepared.rubric)[0];
         if (!parsed) throw Object.assign(new Error('The provider response did not contain a valid report for this call.'), { errorCode: 'report_parse', retryable: true });
-        parsed.fileName = file.name; parsed.agentName = englishLabel(parsed.agentName); parsed.durationSeconds = file.durationSeconds || null;
+        parsed.fileName = file.name; parsed.agentName = agentLabelFromReport(parsed.agentName, parsed.markdown); parsed.durationSeconds = file.durationSeconds || null;
         if (prepared.products.length && !parsed.productCheckPresent) parsed.markdown = `> ⚠️ নির্বাচিত প্রোডাক্ট তথ্য দেওয়া হয়েছিল, কিন্তু AI রিপোর্টে claim-by-claim product verification পাওয়া যায়নি।\n\n${parsed.markdown}`;
         if (!parsed.storageEligible) throw Object.assign(new Error('The report was generated, but its score could not be reconciled.'), { errorCode: 'score_reconciliation', retryable: false, result: parsed });
         results.push(parsed);

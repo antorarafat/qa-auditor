@@ -157,6 +157,10 @@ const copy = {
     changeLanguage: "বাংলায় দেখুন",
     newAudit: "New Audit",
     profileMenu: "Open profile menu",
+    modelUsed: "Models",
+    reasoningUsed: "Reasoning",
+    estimatedCost: "Estimated API cost",
+    evidenceCache: "Evidence cache",
   },
   bn: {
     signIn: "আবার স্বাগতম",
@@ -231,6 +235,10 @@ const copy = {
     changeLanguage: "View in English",
     newAudit: "নতুন অডিট",
     profileMenu: "প্রোফাইল মেনু খুলুন",
+    modelUsed: "ব্যবহৃত মডেল",
+    reasoningUsed: "রিজনিং",
+    estimatedCost: "আনুমানিক API খরচ",
+    evidenceCache: "এভিডেন্স ক্যাশ",
   },
 };
 
@@ -1046,6 +1054,14 @@ function AppContent({ language, toggleLanguage }) {
                       </Button>
                     </div>
                   </div>
+                  {(result.model || result.reasoningEffort || result.evidenceCache) && (
+                    <div className="result-meta">
+                      {result.model && <span>{t.modelUsed}: <strong>{result.model}</strong></span>}
+                      {result.reasoningEffort && <span>{t.reasoningUsed}: <strong>{result.reasoningEffort}</strong></span>}
+                      {Number.isFinite(Number(result.estimatedCostUsd)) && <span>{t.estimatedCost}: <strong>${Number(result.estimatedCostUsd).toFixed(6)}</strong></span>}
+                      {result.evidenceCache && <span>{t.evidenceCache}: <strong>{result.evidenceCache.hits || 0}/{(result.evidenceCache.hits || 0) + (result.evidenceCache.misses || 0)}</strong></span>}
+                    </div>
+                  )}
                   {result.auditResultWrite?.status === "failed" && (
                     <div className="storage-warning">
                       <AlertTriangle size={18} />

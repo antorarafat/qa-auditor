@@ -92,6 +92,11 @@ const bnCopy = {
   Copy: "কপি",
   User: "ব্যবহারকারী",
   Model: "মডেল",
+  Reasoning: "রিজনিং",
+  "Estimated API cost": "আনুমানিক API খরচ",
+  "Evidence cache": "এভিডেন্স ক্যাশ",
+  hits: "হিট",
+  misses: "মিস",
   "Not recorded": "সংরক্ষিত নেই",
   Source: "উৎস",
   Cached: "ক্যাশড",
@@ -787,6 +792,27 @@ export function ReportsView({ user, onNewAudit }) {
                 {tr("Parameter")}
                 <strong>{selected.parameterSnapshot || tr("Generic")}</strong>
               </span>
+              {selected.reasoningEffort ? (
+                <span>
+                  {tr("Reasoning")}
+                  <strong>{selected.reasoningEffort}</strong>
+                </span>
+              ) : null}
+              {Number.isFinite(Number(selected.estimatedCostUsd)) ? (
+                <span>
+                  {tr("Estimated API cost")}
+                  <strong>${Number(selected.estimatedCostUsd).toFixed(6)}</strong>
+                </span>
+              ) : null}
+              {selected.evidenceCache ? (
+                <span>
+                  {tr("Evidence cache")}
+                  <strong>
+                    {selected.evidenceCache.hits || 0} {tr("hits")} ·{" "}
+                    {selected.evidenceCache.misses || 0} {tr("misses")}
+                  </strong>
+                </span>
+              ) : null}
             </div>
             {selected.items?.map((item, index) =>
               item.status === "success" ? (

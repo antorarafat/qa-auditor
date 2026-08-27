@@ -16,12 +16,40 @@ const TEMPLATE_DIR = process.env.TEMPLATE_DIR || path.join(ROOT, 'templates');
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 const DEFAULT_OPENAI_MODELS = ['gpt-audio-1.5'];
+const DEFAULT_OPENAI_REPORT_MODELS = ['gpt-5.6-luna', 'gpt-5.6-terra'];
+const OPENAI_EVIDENCE_VERSION = '2026-08-27-evidence-v1';
+const DEFAULT_OPENAI_REASONING_EFFORT = 'medium';
+const DEFAULT_OPENAI_AUDIO_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_OPENAI_REPORT_TIMEOUT_MS = 3 * 60 * 1000;
 const DEFAULT_GEMINI_DEADLINE_MS = 10 * 60 * 1000;
 const DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS = 590 * 1000;
 const DEFAULT_GEMINI_RETRY_DELAY_MS = 15 * 1000;
 const DEFAULT_GEMINI_MAX_ROUNDS = 1;
 const DEFAULT_GEMINI_TEMPERATURE = 0.2;
-const ANALYSIS_VERSION = '2026-08-26-simple-prompt-v1';
+const ANALYSIS_VERSION = '2026-08-27-openai-evidence-v1';
+
+const OPENAI_EVIDENCE_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['file_name', 'language', 'duration_seconds', 'advisor_names', 'customer_enrollment_status', 'call_objective', 'sales_pitch_applicable', 'sales_pitch_applicability_evidence', 'call_summary', 'transcript_segments', 'product_claims', 'customer_needs', 'customer_questions', 'customer_objections', 'advisor_behaviors', 'critical_events', 'talk_listen_observation'],
+  properties: {
+    file_name: { type: 'string' }, language: { type: 'string' }, duration_seconds: { type: 'number' },
+    advisor_names: { type: 'array', items: { type: 'string' } },
+    customer_enrollment_status: { type: 'string', enum: ['enrolled', 'prospect', 'unclear'] },
+    call_objective: { type: 'string', enum: ['sales', 'feedback', 'service_check', 'support', 'mixed', 'unclear'] },
+    sales_pitch_applicable: { type: 'boolean' }, sales_pitch_applicability_evidence: { type: 'string' }, call_summary: { type: 'string' },
+    transcript_segments: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['start', 'end', 'speaker', 'text', 'tone'], properties: { start: { type: 'string' }, end: { type: 'string' }, speaker: { type: 'string' }, text: { type: 'string' }, tone: { type: 'string' } } } },
+    product_claims: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['timestamp', 'speaker', 'claim'], properties: { timestamp: { type: 'string' }, speaker: { type: 'string' }, claim: { type: 'string' } } } },
+    customer_needs: { type: 'array', items: { type: 'string' } }, customer_questions: { type: 'array', items: { type: 'string' } }, customer_objections: { type: 'array', items: { type: 'string' } }, advisor_behaviors: { type: 'array', items: { type: 'string' } },
+    critical_events: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['timestamp', 'type', 'detail', 'exact_words'], properties: { timestamp: { type: 'string' }, type: { type: 'string' }, detail: { type: 'string' }, exact_words: { type: 'string' } } } },
+    talk_listen_observation: { type: 'string' }
+  }
+};
+
+const OPENAI_PRICING_PER_MILLION = {
+  'gpt-audio-1.5': { textInput: 2.5, textOutput: 10, audioInput: 32, audioOutput: 64, cachedInput: 2.5 },
+  'gpt-5.6-luna': { textInput: 0.2, textOutput: 1.2, audioInput: 0, audioOutput: 0, cachedInput: 0.02 },
+  'gpt-5.6-terra': { textInput: 2, textOutput: 12, audioInput: 0, audioOutput: 0, cachedInput: 0.2 }
+};
 
 function envNumber(name, fallback) { const value = Number.parseInt(process.env[name] || '', 10); return Number.isFinite(value) && value > 0 ? value : fallback; }
 function envFloat(name, fallback) { const value = Number.parseFloat(process.env[name] || ''); return Number.isFinite(value) && value >= 0 && value <= 2 ? value : fallback; }
@@ -53,7 +81,50 @@ function setSessionCookie(res, token, secure) { res.setHeader('Set-Cookie', `qa_
 function clearSessionCookie(res, secure) { res.setHeader('Set-Cookie', `qa_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure ? '; Secure' : ''}`); }
 function isSameOrigin(req, allowedOrigins) { const origin = req.get('origin'); return !origin || (allowedOrigins.length ? allowedOrigins.includes(origin) : origin === `${req.protocol}://${req.get('host')}`); }
 function validateAudioFiles(files) { if (!Array.isArray(files) || !files.length) throw new Error('Upload at least one audio file.'); return files.map(file => { if (!file || typeof file.data !== 'string' || !String(file.mimeType || '').startsWith('audio/')) throw new Error('Only audio files are supported.'); const buffer = Buffer.from(file.data, 'base64'); if (!buffer.length) throw new Error('Invalid audio data.'); return { data: file.data, mimeType: String(file.mimeType), name: String(file.name || 'audio').slice(0, 200), size: buffer.length, sha256: crypto.createHash('sha256').update(buffer).digest('hex') }; }); }
-function parseJsonText(text) { const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''); try { return JSON.parse(cleaned); } catch { throw new Error('The AI returned malformed structured JSON.'); } }
+function parseJsonText(text) { const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''); try { return JSON.parse(cleaned); } catch { const start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}'); if (start >= 0 && end > start) { try { return JSON.parse(cleaned.slice(start, end + 1)); } catch {} } throw providerError('The AI returned malformed structured JSON.', 'invalid_response', true); } }
+function openAiSchema(schema) {
+  if (Array.isArray(schema)) return schema.map(openAiSchema);
+  if (!schema || typeof schema !== 'object') return schema;
+  const converted = Object.fromEntries(Object.entries(schema).filter(([key]) => key !== 'prefixItems').map(([key, value]) => [key, openAiSchema(value)]));
+  if (schema.type === 'array' && Array.isArray(schema.prefixItems) && schema.prefixItems.length) converted.items = { anyOf: schema.prefixItems.map(openAiSchema) };
+  return converted;
+}
+function normalizeOpenAiUsage(model, usage = {}) {
+  const promptDetails = usage.prompt_tokens_details || usage.input_tokens_details || {};
+  const completionDetails = usage.completion_tokens_details || usage.output_tokens_details || {};
+  const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0) || 0;
+  const outputTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? 0) || 0;
+  const audioInputTokens = Number(promptDetails.audio_tokens || 0) || 0;
+  const audioOutputTokens = Number(completionDetails.audio_tokens || 0) || 0;
+  const cachedInputTokens = Number(promptDetails.cached_tokens || 0) || 0;
+  return {
+    model, inputTokens, outputTokens, cachedInputTokens, audioInputTokens, audioOutputTokens,
+    textInputTokens: Math.max(0, inputTokens - audioInputTokens), textOutputTokens: Math.max(0, outputTokens - audioOutputTokens),
+    reasoningTokens: Number(completionDetails.reasoning_tokens || 0) || 0
+  };
+}
+function estimateOpenAiCost(usageItems) {
+  const total = (Array.isArray(usageItems) ? usageItems : []).reduce((sum, usage) => {
+    const pricing = OPENAI_PRICING_PER_MILLION[usage.model];
+    if (!pricing) return sum;
+    const uncachedTextInput = Math.max(0, usage.textInputTokens - usage.cachedInputTokens);
+    return sum + ((uncachedTextInput * pricing.textInput) + (usage.cachedInputTokens * pricing.cachedInput) + (usage.textOutputTokens * pricing.textOutput) + (usage.audioInputTokens * pricing.audioInput) + (usage.audioOutputTokens * pricing.audioOutput)) / 1_000_000;
+  }, 0);
+  return Number(total.toFixed(6));
+}
+function combineOpenAiUsage(items) {
+  const requests = (Array.isArray(items) ? items : []).filter(Boolean);
+  return {
+    requests: requests.length,
+    inputTokens: requests.reduce((sum, item) => sum + item.inputTokens, 0),
+    outputTokens: requests.reduce((sum, item) => sum + item.outputTokens, 0),
+    cachedInputTokens: requests.reduce((sum, item) => sum + item.cachedInputTokens, 0),
+    audioInputTokens: requests.reduce((sum, item) => sum + item.audioInputTokens, 0),
+    reasoningTokens: requests.reduce((sum, item) => sum + item.reasoningTokens, 0),
+    byRequest: requests,
+    estimatedCostUsd: estimateOpenAiCost(requests)
+  };
+}
 
 function providerError(message, errorCode, retryable, providerStatus, attempts = []) {
   const error = new Error(message);
@@ -93,6 +164,10 @@ function createProviderClient(config = {}) {
   const sleepImpl = config.sleepImpl || (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)));
   const geminiModels = config.geminiModels || envList('GEMINI_MODELS', DEFAULT_GEMINI_MODELS);
   const openaiModels = config.openaiModels || envList('OPENAI_MODELS', DEFAULT_OPENAI_MODELS);
+  const openaiReportModels = config.openaiReportModels || envList('OPENAI_REPORT_MODELS', DEFAULT_OPENAI_REPORT_MODELS);
+  const openaiReasoningEffort = config.openaiReasoningEffort || process.env.OPENAI_REASONING_EFFORT || DEFAULT_OPENAI_REASONING_EFFORT;
+  const openaiAudioTimeoutMs = config.openaiAudioTimeoutMs ?? envNumber('OPENAI_AUDIO_TIMEOUT_MS', DEFAULT_OPENAI_AUDIO_TIMEOUT_MS);
+  const openaiReportTimeoutMs = config.openaiReportTimeoutMs ?? envNumber('OPENAI_REPORT_TIMEOUT_MS', DEFAULT_OPENAI_REPORT_TIMEOUT_MS);
   const geminiDeadlineMs = config.geminiDeadlineMs ?? envNumber('GEMINI_CALL_DEADLINE_MS', DEFAULT_GEMINI_DEADLINE_MS);
   const geminiAttemptTimeoutMs = config.geminiAttemptTimeoutMs ?? envNumber('GEMINI_ATTEMPT_TIMEOUT_MS', DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS);
   const geminiRetryDelayMs = config.geminiRetryDelayMs ?? envNumber('GEMINI_RETRY_DELAY_MS', DEFAULT_GEMINI_RETRY_DELAY_MS);
@@ -205,12 +280,73 @@ function createProviderClient(config = {}) {
     }
     throw providerError(lastError, /quota|rate limit/i.test(lastError) ? 'rate_limited' : 'provider_unavailable', true);
   }
+  function openAiMessageText(data) {
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) return content.map(part => part?.text || '').join('');
+    return '';
+  }
+  async function openAiChatRequest(apiKey, model, body, timeoutMs) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    try {
+      response = await fetchImpl('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, ...body }), signal: controller.signal });
+    } catch (error) {
+      const timedOut = controller.signal.aborted || error?.name === 'AbortError';
+      throw providerError(timedOut ? `OpenAI model ${model} timed out.` : `OpenAI model ${model} could not be reached.`, timedOut ? 'provider_timeout' : 'provider_network', true);
+    } finally { clearTimeout(timeout); }
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) return data;
+    const message = String(data.error?.message || 'OpenAI request failed');
+    console.error(`OpenAI model ${model} returned HTTP ${response.status}: ${message.replace(/\s+/g, ' ').slice(0, 300)}`);
+    if (response.status === 403 && /does not have access to model|model[^.]{0,80}(?:access|permission)|not permitted.*model/i.test(message)) throw providerError(`The OpenAI project does not have access to model ${model}.`, 'provider_incompatible', true, response.status);
+    if (response.status === 401 || response.status === 403) throw providerError('OpenAI credential rejected.', 'invalid_credentials', false, response.status);
+    if (response.status === 429) { const error = providerError('OpenAI quota or rate limit exceeded.', 'rate_limited', true, response.status); error.retryAfterMs = retryAfterMilliseconds(response); throw error; }
+    if (response.status === 404 || /not found|deprecated|not supported|does not exist|model/i.test(message)) throw providerError(`OpenAI model ${model} is unavailable.`, 'provider_incompatible', true, response.status);
+    if (response.status === 400 && /response.?format|json.?schema|invalid schema|unsupported parameter/i.test(message)) throw providerError(`OpenAI model ${model} rejected the report schema.`, 'provider_incompatible', true, response.status);
+    if (response.status >= 500) throw providerError('OpenAI is temporarily unavailable.', 'provider_unavailable', true, response.status);
+    throw providerError(`OpenAI request rejected (HTTP ${response.status}).`, 'request_rejected', false, response.status);
+  }
+  async function extractOpenAIEvidence(apiKey, audioFile, prompt) {
+    const content = [{ type: 'text', text: `${prompt}\n\nReturn JSON only matching this schema. Do not wrap it in a code fence:\n${JSON.stringify(OPENAI_EVIDENCE_SCHEMA)}` }, { type: 'input_audio', input_audio: { data: audioFile.data, format: /wav/i.test(`${audioFile.mimeType} ${audioFile.name}`) ? 'wav' : 'mp3' } }];
+    let lastError = providerError('No OpenAI audio model completed evidence extraction.', 'provider_unavailable', true);
+    for (const model of openaiModels) {
+      try {
+        const data = await openAiChatRequest(apiKey, model, { modalities: ['text'], messages: [{ role: 'user', content }] }, openaiAudioTimeoutMs);
+        const text = openAiMessageText(data);
+        if (!text) throw providerError('OpenAI returned no audio evidence.', 'invalid_response', true);
+        const value = parseJsonText(text);
+        console.log(`OpenAI evidence model ${model} completed ${audioFile.name}.`);
+        return { value, model, usage: normalizeOpenAiUsage(model, data.usage) };
+      } catch (error) {
+        lastError = error;
+        if (error.errorCode === 'invalid_credentials' || error.retryable === false) throw error;
+      }
+    }
+    throw lastError;
+  }
+  async function callOpenAITextStructured(apiKey, prompt, schema, model, options = {}) {
+    const selectedModel = model || openaiReportModels[0];
+    const reasoningEffort = options.reasoningEffort || openaiReasoningEffort;
+    const data = await openAiChatRequest(apiKey, selectedModel, {
+      messages: [{ role: 'developer', content: 'Follow the supplied evidence and business rules exactly. Return only the requested structured report.' }, { role: 'user', content: prompt }],
+      reasoning_effort: reasoningEffort,
+      response_format: { type: 'json_schema', json_schema: { name: options.schemaName || 'audit_report', strict: true, schema: openAiSchema(schema) } }
+    }, options.timeoutMs || openaiReportTimeoutMs);
+    const text = openAiMessageText(data);
+    if (!text) throw providerError(`OpenAI model ${selectedModel} returned no structured report.`, 'invalid_response', true);
+    const value = parseJsonText(text);
+    console.log(`OpenAI report model ${selectedModel} completed with reasoning effort ${reasoningEffort}.`);
+    return { value, model: selectedModel, reasoningEffort, usage: normalizeOpenAiUsage(selectedModel, data.usage) };
+  }
   return {
     async callStructured(provider, key, files, prompt, schema) { return provider === 'gemini' ? callGemini(key, files, prompt, schema, geminiModels, { maxRounds: 1 }) : callOpenAI(key, files, prompt, schema); },
     async callMarkdown(provider, key, files, prompt) { return provider === 'gemini' ? callGemini(key, files, prompt, null, geminiModels, { maxRounds: 1 }) : callOpenAIMarkdown(key, files, prompt); },
     async callStructuredWithMeta(provider, key, files, prompt, schema) { return provider === 'gemini' ? callGemini(key, files, prompt, schema, geminiModels, { maxRounds: 1, withMeta: true }) : callOpenAI(key, files, prompt, schema, true); },
     async callMarkdownWithMeta(provider, key, files, prompt) { return provider === 'gemini' ? callGemini(key, files, prompt, null, geminiModels, { maxRounds: 1, withMeta: true }) : callOpenAIMarkdown(key, files, prompt, true); },
-    callGemini, callOpenAI, callOpenAIMarkdown
+    callGemini, callOpenAI, callOpenAIMarkdown, extractOpenAIEvidence, callOpenAITextStructured,
+    openaiAudioModels: [...openaiModels], openaiReportModels: [...openaiReportModels], openaiReasoningEffort
   };
 }
 
@@ -328,6 +464,63 @@ function markdownRunSummary(results) {
 function voicePrompt(company, products, count) { return `Analyze ${count} calls for ${company} as a Customer Insights analyst. Return one Bangla summary grounded only in the recordings. Include precise timestamps where useful. This is not a QA scorecard and must not score calls.\n\nPRODUCT CONTEXT:\n${productContext(products)}`; }
 function coachingPrompt(company, rubric, products, count) { return `Analyze ${count} calls for ${company} as a senior sales communication coach. Return one Bangla coaching summary with precise [MM:SS] timestamps. Use the selected ${rubric.name} rubric only as coaching context; do not produce scores.\n\nPRODUCT CONTEXT:\n${productContext(products)}\n\nLIVE RUBRIC:\n${rubric.source}`; }
 
+function openAiEvidencePrompt(fileName) {
+  return `Listen to exactly one customer call recording (${fileName}) once and create reusable, loss-minimizing evidence for later QA, customer-insight, and coaching reports.
+
+Evidence rules:
+- Transcribe the complete meaningful conversation into chronological 10–30 second segments. Preserve exact Bangla/English wording for important claims, objections, commitments, rudeness, incorrect guidance, and coaching moments.
+- Use MM:SS timestamps from the start of the recording. Never invent a timestamp, speaker, name, claim, or event.
+- Identify the call's real objective and whether the customer is already enrolled. An enrolled feedback/service/support call does not require a sales pitch unless an upsell, cross-sell, renewal, or new sale is actually attempted.
+- Record every concrete product claim separately so it can later be checked against official product facts.
+- Record possible critical errors and exact words without deciding the final QA score.
+- Capture customer need, questions, objections, advisor behavior, tone changes, and talk/listen balance.
+- Keep narrative strings concise but preserve all evidence that could affect a score, CE decision, product verification, customer insight, or coaching recommendation.
+- Use the exact enum values specified by the schema.`;
+}
+
+function evidenceEnum(value, allowed, fallback = 'unclear') { const normalized = String(value || '').trim().toLowerCase(); return allowed.includes(normalized) ? normalized : fallback; }
+function evidenceStrings(value) { return Array.isArray(value) ? value.map(item => String(item || '').trim()).filter(Boolean) : []; }
+function validateOpenAiEvidence(value, fileName) {
+  if (!value || typeof value !== 'object') throw providerError('OpenAI returned invalid audio evidence.', 'invalid_response', true);
+  const transcriptSegments = (Array.isArray(value.transcript_segments) ? value.transcript_segments : []).map(segment => ({ start: String(segment?.start || '').trim(), end: String(segment?.end || '').trim(), speaker: String(segment?.speaker || '').trim(), text: String(segment?.text || '').trim(), tone: String(segment?.tone || '').trim() })).filter(segment => segment.start && segment.end && segment.speaker && segment.text);
+  if (!transcriptSegments.length) throw providerError('OpenAI audio evidence did not contain a timestamped transcript.', 'invalid_response', true);
+  const productClaims = (Array.isArray(value.product_claims) ? value.product_claims : []).map(item => ({ timestamp: String(item?.timestamp || '').trim(), speaker: String(item?.speaker || '').trim(), claim: String(item?.claim || '').trim() })).filter(item => item.timestamp && item.claim);
+  const criticalEvents = (Array.isArray(value.critical_events) ? value.critical_events : []).map(item => ({ timestamp: String(item?.timestamp || '').trim(), type: String(item?.type || '').trim(), detail: String(item?.detail || '').trim(), exact_words: String(item?.exact_words || '').trim() })).filter(item => item.timestamp && item.detail);
+  return {
+    file_name: String(value.file_name || fileName).trim() || fileName, language: String(value.language || 'Bangla').trim(), duration_seconds: Math.max(0, Number(value.duration_seconds) || 0),
+    advisor_names: evidenceStrings(value.advisor_names), customer_enrollment_status: evidenceEnum(value.customer_enrollment_status, ['enrolled', 'prospect', 'unclear']), call_objective: evidenceEnum(value.call_objective, ['sales', 'feedback', 'service_check', 'support', 'mixed', 'unclear']),
+    sales_pitch_applicable: value.sales_pitch_applicable !== false, sales_pitch_applicability_evidence: String(value.sales_pitch_applicability_evidence || 'স্পষ্ট প্রমাণ পাওয়া যায়নি।').trim(), call_summary: String(value.call_summary || '').trim() || 'কলের সারাংশ প্রমাণ থেকে নির্ধারণ করা যায়নি।',
+    transcript_segments: transcriptSegments, product_claims: productClaims, customer_needs: evidenceStrings(value.customer_needs), customer_questions: evidenceStrings(value.customer_questions), customer_objections: evidenceStrings(value.customer_objections), advisor_behaviors: evidenceStrings(value.advisor_behaviors), critical_events: criticalEvents, talk_listen_observation: String(value.talk_listen_observation || 'পর্যাপ্ত প্রমাণ নেই।').trim()
+  };
+}
+
+function openAiQaReportPrompt(company, rubric, products, file, evidence) {
+  return `${qaPrompt(company, rubric, products, file.name)}
+
+IMPORTANT EVIDENCE CONTRACT:
+- The audio was already listened to once by the evidence model. Evaluate only the evidence below; do not claim facts that are absent.
+- The evidence model's CE-related events are leads, not final decisions. Apply the live CE rules yourself.
+- Verify product claims only against the selected official product facts above. If no matching official fact exists, say Not verifiable instead of guessing.
+- Return every required field in the supplied JSON schema. Keep all narrative output in Bangla and retain precise timestamps.
+
+REUSABLE CALL EVIDENCE:
+${JSON.stringify(evidence)}`;
+}
+
+function openAiSummaryReportPrompt(mode, company, rubric, products, evidences) {
+  const base = mode === 'voice' ? voicePrompt(company, products, evidences.length) : coachingPrompt(company, rubric, products, evidences.length);
+  return `${base}
+
+The audio has already been converted to reusable timestamped evidence. Use only this evidence. Keep every required field in Bangla, preserve precise timestamps, and do not invent missing facts.
+
+CALL EVIDENCE:
+${JSON.stringify(evidences)}`;
+}
+
+function openAiEvidenceCacheKey(user, file, extractorModel = DEFAULT_OPENAI_MODELS[0]) {
+  return crypto.createHash('sha256').update(`${user.id || user.email}\0${file.sha256}\0${extractorModel}\0${OPENAI_EVIDENCE_VERSION}`).digest('hex');
+}
+
 function normalizeAnalysisInput(body) {
   const provider = String(body?.provider || '').toLowerCase();
   const mode = String(body?.mode || 'single');
@@ -351,23 +544,129 @@ async function prepareAnalysis(dataStore, user, input, audioFiles, templateDir) 
     if (!entry) throw Object.assign(new Error('The selected QA parameter is no longer available.'), { statusCode: 400 });
     rubric = pipeline.parseQaRubric(entry.name, entry.detail); parameter = entry.name;
   }
-  const templateKeys = input.mode === 'single' ? ['qaSummary'] : [input.mode];
+  const templateKeys = input.mode === 'single' ? (input.provider === 'openai' ? ['qaCall', 'qaSummary'] : ['qaSummary']) : [input.mode];
   const templates = pipeline.loadAndValidateTemplates(templateDir, templateKeys);
   const identity = input.mode === 'single'
-    ? `${ANALYSIS_VERSION}\nqa-markdown\n${user.companyName}\n${parameter}\n${rubric.source}\n${productContext(products)}\n${templates.qaSummary}`
+    ? `${ANALYSIS_VERSION}\n${input.provider === 'openai' ? 'openai-evidence-structured' : 'qa-markdown'}\n${user.companyName}\n${parameter}\n${rubric.source}\n${productContext(products)}\n${templates.qaCall || ''}\n${templates.qaSummary}`
     : `${ANALYSIS_VERSION}\n${input.mode}\n${user.companyName}\n${parameter}\n${rubric?.source || ''}\n${productContext(products)}\n${templates[input.mode]}`;
   return { apiKey, products, parameter, rubric, templates, cacheKey: analysisCacheKey(user, input.provider, identity, audioFiles) };
 }
 
 async function cacheGet(dataStore, memoryCache, key) { return dataStore.getCachedAnalysis ? dataStore.getCachedAnalysis(key) : memoryCache.get(key); }
 async function cacheSet(dataStore, memoryCache, key, result, ttlMs) { return dataStore.setCachedAnalysis ? dataStore.setCachedAnalysis(key, result, ttlMs) : memoryCache.set(key, result); }
+function cachedAnalysisResponse(cached) {
+  return { ...cached, cached: true, originalEstimatedCostUsd: cached.estimatedCostUsd, estimatedCostUsd: cached.estimatedCostUsd === undefined ? undefined : 0, usage: cached.usage ? { requests: 0, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, audioInputTokens: 0, reasoningTokens: 0, byRequest: [], estimatedCostUsd: 0, reusedOriginal: cached.usage } : cached.usage, auditResultWrite: cached.mode === 'single' ? { status: 'cached', savedRows: 0 } : cached.auditResultWrite };
+}
+
+async function generateOpenAiStructuredReport(providerClient, apiKey, prompt, schema, validator, schemaName) {
+  const models = providerClient.openaiReportModels?.length ? providerClient.openaiReportModels : envList('OPENAI_REPORT_MODELS', DEFAULT_OPENAI_REPORT_MODELS);
+  let lastError = providerError('No OpenAI report model completed the report.', 'provider_unavailable', true); let primaryValidationFailed = false;
+  for (const model of models) {
+    try {
+      const response = await providerClient.callOpenAITextStructured(apiKey, prompt, schema, model, { schemaName, reasoningEffort: providerClient.openaiReasoningEffort || process.env.OPENAI_REASONING_EFFORT || DEFAULT_OPENAI_REASONING_EFFORT });
+      try { return { ...response, validated: validator(response.value) }; }
+      catch (error) {
+        console.error(`OpenAI report model ${model} failed deterministic validation: ${error.message}`);
+        if (model === models[0]) primaryValidationFailed = true;
+        lastError = providerError(`OpenAI model ${model} returned a report that failed deterministic validation.`, 'invalid_response', true);
+      }
+    } catch (error) {
+      lastError = error;
+      if (error.errorCode === 'invalid_credentials' || error.retryable === false) throw error;
+    }
+  }
+  if (primaryValidationFailed && models.length > 1 && lastError.retryable !== false) {
+    const model = models[0];
+    try {
+      const response = await providerClient.callOpenAITextStructured(apiKey, `${prompt}\n\nYour previous report failed deterministic validation. Re-check every required field, exact rubric row, score maximum, timestamp, total, product check, and CE relationship before returning the corrected result.`, schema, model, { schemaName, reasoningEffort: 'high' });
+      return { ...response, validated: validator(response.value) };
+    } catch (error) { lastError = error.errorCode ? error : providerError(`OpenAI model ${model} returned an invalid corrected report.`, 'invalid_response', true); }
+  }
+  throw lastError;
+}
+
+async function getOpenAiEvidence(dataStore, providerClient, user, apiKey, file) {
+  const extractorIdentity = (providerClient.openaiAudioModels?.[0] || envList('OPENAI_MODELS', DEFAULT_OPENAI_MODELS)[0]);
+  const cacheKey = openAiEvidenceCacheKey(user, file, extractorIdentity);
+  if (dataStore.getAudioEvidence) {
+    const cached = await dataStore.getAudioEvidence(user.id || user.email, cacheKey);
+    if (cached?.evidence) return { evidence: validateOpenAiEvidence(cached.evidence, file.name), model: cached.model || extractorIdentity, cached: true, usage: null, cacheKey };
+  }
+  const extracted = await providerClient.extractOpenAIEvidence(apiKey, file, openAiEvidencePrompt(file.name));
+  const evidence = validateOpenAiEvidence(extracted.value, file.name);
+  if (dataStore.setAudioEvidence) {
+    await dataStore.setAudioEvidence(user.id || user.email, cacheKey, { audioSha256: file.sha256, fileName: file.name, extractorVersion: OPENAI_EVIDENCE_VERSION, model: extracted.model, evidence, usage: extracted.usage }).catch(error => console.error(`Audio evidence cache write failed for ${file.name}: ${error.message}`));
+  }
+  return { evidence, model: extracted.model, cached: false, usage: extracted.usage, cacheKey };
+}
+
+function openAiModelSummary(evidenceModels, reportModels) {
+  const evidence = [...new Set(evidenceModels.filter(Boolean))]; const reports = [...new Set(reportModels.filter(Boolean))];
+  return [...evidence, ...reports].join(' → ');
+}
+
+async function runOpenAiAnalysis({ dataStore, providerClient }, user, input, audioFiles, prepared, timestamp, evaluationDate, jobId) {
+  if (!providerClient.extractOpenAIEvidence || !providerClient.callOpenAITextStructured) throw providerError('The OpenAI evidence pipeline is unavailable.', 'provider_unavailable', true);
+  const items = []; const perFileItems = new Map(); const evidenceModels = []; const reportModels = []; const reasoningEfforts = []; const usageItems = []; const successfulEvidence = []; let evidenceCacheHits = 0; let evidenceCacheMisses = 0;
+
+  for (const file of audioFiles) {
+    try {
+      const extracted = await getOpenAiEvidence(dataStore, providerClient, user, prepared.apiKey, file);
+      successfulEvidence.push({ file, evidence: extracted.evidence }); evidenceModels.push(extracted.model);
+      if (extracted.cached) evidenceCacheHits += 1; else { evidenceCacheMisses += 1; if (extracted.usage) usageItems.push(extracted.usage); }
+    } catch (error) {
+      const safe = safeProviderFailure(error);
+      perFileItems.set(file, { kind: 'call', fileName: file.name, status: 'failed', error: safe.error, errorCode: safe.errorCode, retryable: safe.retryable, stage: 'evidence' });
+    }
+  }
+
+  if (!successfulEvidence.length) { const failure = perFileItems.values().next().value; throw providerError('No recording could be converted to reliable evidence.', failure?.errorCode || 'invalid_response', failure?.retryable !== false); }
+
+  if (input.mode === 'single') {
+    const results = [];
+    for (const entry of successfulEvidence) {
+      try {
+        const generated = await generateOpenAiStructuredReport(providerClient, prepared.apiKey, openAiQaReportPrompt(user.companyName, prepared.rubric, prepared.products, entry.file, entry.evidence), pipeline.qaSchema(prepared.rubric), value => pipeline.validateQaResult(value, prepared.rubric), 'qa_call_report');
+        const result = generated.validated; result.fileName = entry.file.name; reportModels.push(generated.model); reasoningEfforts.push(generated.reasoningEffort); if (generated.usage) usageItems.push(generated.usage);
+        const markdown = pipeline.renderQaCall(prepared.templates.qaCall, result, user.companyName, evaluationDate);
+        results.push(result); perFileItems.set(entry.file, { kind: 'call', fileName: entry.file.name, status: 'success', markdown, score: result.finalScore, maximum: result.maximum, ce: result.ceDetected, model: generated.model });
+      } catch (error) {
+        const safe = safeProviderFailure(error);
+        perFileItems.set(entry.file, { kind: 'call', fileName: entry.file.name, status: 'failed', error: safe.error, errorCode: safe.errorCode, retryable: safe.retryable, stage: 'report' });
+      }
+    }
+    if (!results.length) { const failure = [...perFileItems.values()].find(item => item.stage === 'report'); throw providerError('No recording produced a valid QA report.', failure?.errorCode || 'invalid_response', failure?.retryable !== false); }
+    items.push(...audioFiles.map(file => perFileItems.get(file)).filter(Boolean));
+    const summary = markdownRunSummary(results);
+    items.push({ kind: 'summary', status: 'success', markdown: pipeline.renderQaSummary(prepared.templates.qaSummary, summary, results, results.map(result => result.fileName), user.companyName, prepared.parameter, evaluationDate) });
+    let auditResultWrite = { status: 'saved', savedRows: results.length };
+    try {
+      await dataStore.appendAuditResults(results.map(result => pipeline.auditResultRow(result, prepared.parameter, timestamp)), { ownerUserId: user.id, ownerEmail: user.email, jobId, files: results.map(result => audioFiles.find(file => file.name === result.fileName) || { name: result.fileName }), companyName: user.companyName, parameter: prepared.parameter, products: prepared.products, model: openAiModelSummary(evidenceModels, reportModels) });
+    } catch (error) { console.error('Audit result storage failed:', error.message); auditResultWrite = { status: 'failed', savedRows: 0, message: 'Reports were generated, but the audit results were not saved to the database.' }; }
+    const usage = combineOpenAiUsage(usageItems); const partial = items.some(item => item.status === 'failed') || auditResultWrite.status === 'failed';
+    return { mode: input.mode, items, report: items.filter(item => item.markdown).map(item => item.markdown).join('\n\n---\n\n'), partial, auditResultWrite, cached: false, model: openAiModelSummary(evidenceModels, reportModels), models: { evidence: [...new Set(evidenceModels)], report: [...new Set(reportModels)] }, reasoningEffort: [...new Set(reasoningEfforts.filter(Boolean))].join(', ') || providerClient.openaiReasoningEffort || DEFAULT_OPENAI_REASONING_EFFORT, evidenceCache: { hits: evidenceCacheHits, misses: evidenceCacheMisses }, usage, estimatedCostUsd: usage.estimatedCostUsd };
+  }
+
+  const schema = input.mode === 'voice' ? pipeline.VOICE_SCHEMA : pipeline.COACHING_SCHEMA;
+  const validator = input.mode === 'voice' ? pipeline.validateVoiceResult : pipeline.validateCoachingResult;
+  const generated = await generateOpenAiStructuredReport(providerClient, prepared.apiKey, openAiSummaryReportPrompt(input.mode, user.companyName, prepared.rubric, prepared.products, successfulEvidence.map(entry => ({ file_name: entry.file.name, ...entry.evidence }))), schema, validator, input.mode === 'voice' ? 'customer_voice_report' : 'advisor_coaching_report');
+  reportModels.push(generated.model); if (generated.usage) usageItems.push(generated.usage);
+  const markdown = input.mode === 'voice' ? pipeline.renderVoice(prepared.templates.voice, generated.validated, successfulEvidence.length) : pipeline.renderCoaching(prepared.templates.coaching, generated.validated, user.companyName);
+  items.push(...audioFiles.map(file => perFileItems.get(file)).filter(Boolean));
+  items.push({ kind: input.mode, status: 'success', markdown, model: generated.model });
+  const usage = combineOpenAiUsage(usageItems);
+  return { mode: input.mode, items, report: items.filter(item => item.markdown).map(item => item.markdown).join('\n\n---\n\n'), partial: items.some(item => item.status === 'failed'), auditResultWrite: { status: 'not_applicable', savedRows: 0 }, cached: false, model: openAiModelSummary(evidenceModels, reportModels), models: { evidence: [...new Set(evidenceModels)], report: [...new Set(reportModels)] }, reasoningEffort: generated.reasoningEffort, evidenceCache: { hits: evidenceCacheHits, misses: evidenceCacheMisses }, usage, estimatedCostUsd: usage.estimatedCostUsd };
+}
 
 async function runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, input, audioFiles, runContext = {}) {
   const prepared = await prepareAnalysis(dataStore, user, input, audioFiles, templateDir);
   const cached = await cacheGet(dataStore, memoryCache, prepared.cacheKey);
-  if (cached) return { ...cached, cached: true, auditResultWrite: cached.mode === 'single' ? { status: 'cached', savedRows: 0 } : cached.auditResultWrite };
+  if (cached) return cachedAnalysisResponse(cached);
   const timestamp = new Date().toISOString(); const evaluationDate = timestamp.slice(0, 10); const jobId = runContext.jobId || crypto.randomUUID(); let responseBody; let actualModel = '';
-  if (input.mode === 'single') {
+  if (input.provider === 'openai') {
+    responseBody = await runOpenAiAnalysis({ dataStore, providerClient }, user, input, audioFiles, prepared, timestamp, evaluationDate, jobId);
+    actualModel = responseBody.model || '';
+  } else if (input.mode === 'single') {
     const prompt = qaMarkdownPrompt(user.companyName, prepared.rubric, prepared.products, audioFiles, evaluationDate);
     const providerResult = providerClient.callMarkdownWithMeta ? await providerClient.callMarkdownWithMeta(input.provider, prepared.apiKey, audioFiles, prompt) : { value: await providerClient.callMarkdown(input.provider, prepared.apiKey, audioFiles, prompt), model: '' };
     const reportMarkdown = providerResult.value; actualModel = providerResult.model || '';
@@ -401,7 +700,7 @@ async function runAnalysis({ dataStore, providerClient, memoryCache, templateDir
   if (dataStore.saveReportRun) {
     try {
       const successfulCalls = responseBody.items.filter(item => item.kind === 'call' && item.status === 'success');
-      const saved = await dataStore.saveReportRun({ jobId, ownerUserId: user.id, ownerEmail: user.email, ownerName: user.username || user.name, mode: input.mode, provider: input.provider, model: actualModel, companySnapshot: user.companyName, parameterSnapshot: prepared.parameter, productSnapshot: prepared.products, rubricSnapshot: prepared.rubric ? { name: prepared.rubric.name, maximum: prepared.rubric.maximum, source: prepared.rubric.source } : null, files: audioFiles.map(file => ({ name: file.name, sha256: file.sha256, mimeType: file.mimeType, size: file.size })), items: responseBody.items, report: responseBody.report, partial: responseBody.partial, cached: false, ceCount: successfulCalls.filter(item => item.ce).length, minimumScore: successfulCalls.length ? Math.min(...successfulCalls.map(item => Number(item.score) || 0)) : null, maximumScore: successfulCalls.length ? Math.max(...successfulCalls.map(item => Number(item.score) || 0)) : null, searchText: `${user.email} ${user.username || user.name} ${prepared.parameter} ${audioFiles.map(file => file.name).join(' ')} ${responseBody.report}`.slice(0, 16000), completedAt: new Date() });
+      const saved = await dataStore.saveReportRun({ jobId, ownerUserId: user.id, ownerEmail: user.email, ownerName: user.username || user.name, mode: input.mode, provider: input.provider, model: actualModel, models: responseBody.models, reasoningEffort: responseBody.reasoningEffort, usage: responseBody.usage, estimatedCostUsd: responseBody.estimatedCostUsd, evidenceCache: responseBody.evidenceCache, companySnapshot: user.companyName, parameterSnapshot: prepared.parameter, productSnapshot: prepared.products, rubricSnapshot: prepared.rubric ? { name: prepared.rubric.name, maximum: prepared.rubric.maximum, source: prepared.rubric.source } : null, files: audioFiles.map(file => ({ name: file.name, sha256: file.sha256, mimeType: file.mimeType, size: file.size })), items: responseBody.items, report: responseBody.report, partial: responseBody.partial, cached: false, ceCount: successfulCalls.filter(item => item.ce).length, minimumScore: successfulCalls.length ? Math.min(...successfulCalls.map(item => Number(item.score) || 0)) : null, maximumScore: successfulCalls.length ? Math.max(...successfulCalls.map(item => Number(item.score) || 0)) : null, searchText: `${user.email} ${user.username || user.name} ${prepared.parameter} ${audioFiles.map(file => file.name).join(' ')} ${responseBody.report}`.slice(0, 16000), completedAt: new Date() });
       responseBody.reportRunId = saved.id;
     } catch (error) { console.error('Report history storage failed:', error.message); responseBody.historyWarning = 'The report was generated but could not be added to report history.'; responseBody.partial = true; }
   }
@@ -551,7 +850,7 @@ function createApp(options = {}) {
       const prepared = await prepareAnalysis(dataStore, user, input, audioFiles, templateDir);
       if (input.mode !== 'voice') await setActiveParameter(req.sessionToken, prepared.parameter);
       const cached = await cacheGet(dataStore, memoryCache, prepared.cacheKey);
-      if (cached) return res.json({ ...cached, cached: true, auditResultWrite: input.mode === 'single' ? { status: 'cached', savedRows: 0 } : cached.auditResultWrite });
+      if (cached) return res.json(cachedAnalysisResponse(cached));
       if (!queue) return res.json(await runAnalysis({ dataStore, providerClient, memoryCache, templateDir, cacheTtlMs }, user, input, audioFiles, { jobId: crypto.randomUUID() }));
       const dedupeKey = analysisDedupeKey(user.email, input, audioFiles); const active = await dataStore.findActiveJob(user.email, dedupeKey);
       if (active) return res.status(202).json({ jobId: active.jobId, status: active.status, deduplicated: true });

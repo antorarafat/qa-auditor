@@ -11,15 +11,17 @@ const RUBRIC = `১. Greetings (৫ নম্বর)\n- Greetings (২)\n- Permi
 
 function fakeStore(options = {}) {
   const users = [{ email: 'user@example.com', password: 'plain-password', name: 'Test User', companyName: 'Robi', geminiKey: 'gemini-secret', openaiKey: 'openai-secret', usage: 0, defaultParameter: 'Outbound', defaultParameterColumn: 6 }];
-  const writes = [];
+  const writes = []; const evidenceCache = new Map();
   return {
-    users, writes,
+    users, writes, evidenceCache,
     async findByEmail(email) { return users.find(user => user.email === email) || null; },
     async getAuditConfiguration() { return { products: [{ category: 'HSC 28', subCategories: ['PCMB', 'BEI'] }], parameters: ['Outbound', 'Inbound'] }; },
     async getProductBriefs(categories, selections) { const products = [{ category: 'HSC 28', subCategory: 'PCMB', brief: 'Official PCMB facts' }, { category: 'HSC 28', subCategory: 'BEI', brief: 'Official BEI facts' }]; if (selections.length) return products.filter(product => selections.some(item => item.category === product.category && item.subCategory === product.subCategory)); return products.filter(product => categories.includes(product.category)); },
     async getQaParameter(name) { return ['Outbound', 'Inbound'].includes(name) ? { name, detail: options.malformedRubric ? 'not a rubric' : RUBRIC } : null; },
     async saveDefaultParameter(email, parameter) { users.find(user => user.email === email).defaultParameter = parameter; return true; },
     async appendAuditResults(rows) { if (options.writeFailure) throw new Error('write failed'); writes.push(...rows); return rows.length; },
+    async getAudioEvidence(ownerId, key) { return evidenceCache.get(`${ownerId}:${key}`) || null; },
+    async setAudioEvidence(ownerId, key, value) { evidenceCache.set(`${ownerId}:${key}`, value); return true; },
     async incrementUsage(email) { users.find(user => user.email === email).usage += 1; return true; }
   };
 }
@@ -115,6 +117,35 @@ function fakeProviders(options = {}) {
       if (schema.properties?.recurring_issues) return { recurring_issues: ['একটি সমস্যা'], best_and_worst_calls: 'তুলনা', overall_recommendations: ['কোচিং দিন'] };
       if (schema.properties?.customer_questions) return { advisors_list: 'Agent One', overall_sentiment: 'ইতিবাচক', customer_profile: 'শিক্ষার্থী', customer_need: 'কোর্স', customer_questions: ['মূল্য কত?'], barriers: ['বাজেট'], product_feedback: ['ভালো'], advisor_name: 'Agent One', objection_handling_assessment: 'ভালো', improvement_areas: ['আরও শুনুন'], actionable_recommendations: ['ফলো আপ'] };
       return { advisor_name: 'Agent One', call_topic: 'কোর্স', sales_pitch_audit: ['[00:10] ভালো'], tone_pitch_analysis: ['[00:20] আত্মবিশ্বাসী'], talk_to_listen_ratio: '60:40', listening_skill_notes: 'ভালো', probing_gap_notes: 'আরও প্রশ্ন', script_corrections: [{ timestamp: '[00:30]', wrong: 'পুরনো', correct: 'নতুন' }], weekly_growth_plan: ['অনুশীলন'] };
+    }
+  };
+}
+
+function evidenceResult(fileName = 'call.wav') {
+  return {
+    file_name: fileName, language: 'Bangla', duration_seconds: 60, advisor_names: ['Agent One'], customer_enrollment_status: 'prospect', call_objective: 'sales', sales_pitch_applicable: true,
+    sales_pitch_applicability_evidence: '[00:02] কাস্টমার কোর্স কেনার বিষয়ে জানতে চেয়েছেন।', call_summary: 'কোর্স বিষয়ে আলোচনা',
+    transcript_segments: [{ start: '00:00', end: '00:30', speaker: 'Advisor', text: 'স্বাগতম।', tone: 'professional' }, { start: '00:30', end: '01:00', speaker: 'Customer', text: 'ধন্যবাদ।', tone: 'neutral' }],
+    product_claims: [{ timestamp: '[00:10]', speaker: 'Advisor', claim: 'একটি কোর্স তথ্য' }], customer_needs: ['কোর্স'], customer_questions: ['মূল্য কত?'], customer_objections: ['বাজেট'], advisor_behaviors: ['ভালো সম্ভাষণ'], critical_events: [], talk_listen_observation: '60:40'
+  };
+}
+
+function fakeOpenAiProviders(options = {}) {
+  return {
+    calls: [], openaiAudioModels: ['gpt-audio-1.5'], openaiReportModels: ['gpt-5.6-luna', 'gpt-5.6-terra'], openaiReasoningEffort: 'medium',
+    async extractOpenAIEvidence(_key, file, prompt) {
+      this.calls.push({ kind: 'evidence', file: file.name, prompt });
+      if (options.failEvidence === file.name) { const error = new Error('audio failed'); error.errorCode = 'provider_unavailable'; error.retryable = true; throw error; }
+      return { value: evidenceResult(file.name), model: 'gpt-audio-1.5', usage: { model: 'gpt-audio-1.5', inputTokens: 1000, outputTokens: 200, cachedInputTokens: 0, audioInputTokens: 800, audioOutputTokens: 0, textInputTokens: 200, textOutputTokens: 200, reasoningTokens: 0 } };
+    },
+    async callOpenAITextStructured(_key, prompt, schema, model, callOptions) {
+      this.calls.push({ kind: 'report', prompt, schema, model, callOptions });
+      if (options.terraNoAccess && model === 'gpt-5.6-terra') { const error = new Error('model access denied'); error.errorCode = 'provider_incompatible'; error.retryable = true; throw error; }
+      let value;
+      if (schema.properties?.scores) value = options.invalidLuna && model === 'gpt-5.6-luna' && callOptions.reasoningEffort !== 'high' ? qaResult({ scores: [] }) : qaResult();
+      else if (schema.properties?.customer_questions) value = { advisors_list: 'Agent One', overall_sentiment: 'ইতিবাচক', customer_profile: 'শিক্ষার্থী', customer_need: 'কোর্স', customer_questions: ['মূল্য কত?'], barriers: ['বাজেট'], product_feedback: ['ভালো'], advisor_name: 'Agent One', objection_handling_assessment: 'ভালো', improvement_areas: ['আরও শুনুন'], actionable_recommendations: ['ফলো আপ'] };
+      else value = { advisor_name: 'Agent One', call_topic: 'কোর্স', sales_pitch_audit: ['[00:10] ভালো'], tone_pitch_analysis: ['[00:20] আত্মবিশ্বাসী'], talk_to_listen_ratio: '60:40', listening_skill_notes: 'ভালো', probing_gap_notes: 'আরও প্রশ্ন', script_corrections: [{ timestamp: '[00:30]', wrong: 'পুরনো', correct: 'নতুন' }], weekly_growth_plan: ['অনুশীলন'] };
+      return { value, model, reasoningEffort: callOptions.reasoningEffort, usage: { model, inputTokens: 500, outputTokens: 250, cachedInputTokens: 0, audioInputTokens: 0, audioOutputTokens: 0, textInputTokens: 500, textOutputTokens: 250, reasoningTokens: 50 } };
     }
   };
 }
@@ -359,6 +390,80 @@ test('OpenAI audio calls use gpt-audio-1.5 without unsupported response_format',
   assert.equal(requests[0].model, 'gpt-audio-1.5');
   assert.equal('response_format' in requests[0], false);
   assert.equal(requests[0].messages[0].content[1].type, 'input_audio');
+});
+
+test('OpenAI Luna report calls use strict structured output and explicit reasoning effort', async () => {
+  let requestBody;
+  const provider = createProviderClient({
+    openaiReportModels: ['gpt-5.6-luna'], openaiReasoningEffort: 'medium',
+    fetchImpl: async (_url, options) => { requestBody = JSON.parse(options.body); return { status: 200, ok: true, async json() { return { choices: [{ message: { content: '{"ok":true}' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }; } }; }
+  });
+  const schema = { type: 'object', additionalProperties: false, required: ['ok'], properties: { ok: { type: 'boolean' } } };
+  const result = await provider.callOpenAITextStructured('secret', 'Return ok.', schema, 'gpt-5.6-luna', { schemaName: 'unit_report' });
+  assert.deepEqual(result.value, { ok: true });
+  assert.equal(requestBody.model, 'gpt-5.6-luna');
+  assert.equal(requestBody.reasoning_effort, 'medium');
+  assert.equal(requestBody.response_format.type, 'json_schema');
+  assert.equal(requestBody.response_format.json_schema.strict, true);
+  assert.deepEqual(requestBody.response_format.json_schema.schema, schema);
+});
+
+test('OpenAI converts positional rubric rows into strict enum alternatives', async () => {
+  let requestBody;
+  const provider = createProviderClient({ fetchImpl: async (_url, options) => { requestBody = JSON.parse(options.body); return { status: 200, ok: true, async json() { return { choices: [{ message: { content: '{"rows":[{"name":"Greeting"}]}' } }] }; } }; } });
+  const row = { type: 'object', additionalProperties: false, required: ['name'], properties: { name: { type: 'string', enum: ['Greeting'] } } };
+  const schema = { type: 'object', additionalProperties: false, required: ['rows'], properties: { rows: { type: 'array', minItems: 1, maxItems: 1, prefixItems: [row], items: { type: 'object' } } } };
+  await provider.callOpenAITextStructured('secret', 'Return a row.', schema, 'gpt-5.6-luna');
+  const rows = requestBody.response_format.json_schema.schema.properties.rows;
+  assert.equal('prefixItems' in rows, false);
+  assert.deepEqual(rows.items.anyOf, [row]);
+});
+
+test('OpenAI QA listens once, uses Luna for the structured report, and records cost metadata', async () => {
+  const store = fakeStore(); const providers = fakeOpenAiProviders();
+  const app = createApp({ dataStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const response = await agent.post('/api/analyze').send(payload({ provider: 'openai' }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(providers.calls.map(call => [call.kind, call.model || call.file]), [['evidence', 'call.wav'], ['report', 'gpt-5.6-luna']]);
+  assert.deepEqual(response.body.items.map(item => item.kind), ['call', 'summary']);
+  assert.equal(response.body.items[0].score, 9);
+  assert.equal(response.body.reasoningEffort, 'medium');
+  assert.match(response.body.model, /gpt-audio-1\.5.*gpt-5\.6-luna/);
+  assert.equal(response.body.evidenceCache.misses, 1);
+  assert.equal(response.body.usage.requests, 2);
+  assert.ok(response.body.estimatedCostUsd > 0);
+  assert.equal(store.writes.length, 1);
+});
+
+test('OpenAI reuses cached audio evidence across report modes', async () => {
+  const store = fakeStore(); const providers = fakeOpenAiProviders();
+  const app = createApp({ dataStore: store, providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const qa = await agent.post('/api/analyze').send(payload({ provider: 'openai' })); assert.equal(qa.status, 200);
+  const voice = await agent.post('/api/analyze').send(payload({ provider: 'openai', mode: 'voice', parameter: '' })); assert.equal(voice.status, 200);
+  assert.equal(providers.calls.filter(call => call.kind === 'evidence').length, 1);
+  assert.equal(voice.body.evidenceCache.hits, 1);
+  assert.equal(voice.body.evidenceCache.misses, 0);
+  assert.equal(voice.body.usage.requests, 1);
+});
+
+test('OpenAI retries only the report stage with Terra when Luna fails validation', async () => {
+  const providers = fakeOpenAiProviders({ invalidLuna: true });
+  const app = createApp({ dataStore: fakeStore(), providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const response = await agent.post('/api/analyze').send(payload({ provider: 'openai' }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(providers.calls.filter(call => call.kind === 'report').map(call => call.model), ['gpt-5.6-luna', 'gpt-5.6-terra']);
+  assert.equal(providers.calls.filter(call => call.kind === 'evidence').length, 1);
+  assert.equal(response.body.items[0].model, 'gpt-5.6-terra');
+  assert.match(response.body.model, /gpt-5\.6-terra/);
+});
+
+test('OpenAI retries Luna with high reasoning when Terra access is unavailable', async () => {
+  const providers = fakeOpenAiProviders({ invalidLuna: true, terraNoAccess: true });
+  const app = createApp({ dataStore: fakeStore(), providerClient: providers }); const agent = request.agent(app); await login(agent);
+  const response = await agent.post('/api/analyze').send(payload({ provider: 'openai' }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(providers.calls.filter(call => call.kind === 'report').map(call => [call.model, call.callOptions.reasoningEffort]), [['gpt-5.6-luna', 'medium'], ['gpt-5.6-terra', 'medium'], ['gpt-5.6-luna', 'high']]);
+  assert.equal(response.body.items[0].model, 'gpt-5.6-luna');
 });
 
 test('QA Markdown falls back once per configured model without retrying a full round', async () => {

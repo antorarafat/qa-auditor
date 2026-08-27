@@ -89,6 +89,18 @@ Do not put secrets or personal customer data in a scorecard.
 
 Free-tier provider limits still apply. If every configured model is out of quota, the portal returns a clear retryable error without losing queue state.
 
+## OpenAI evidence pipeline
+
+OpenAI audits use a cost-efficient two-stage path:
+
+1. `gpt-audio-1.5` listens to each recording once and stores reusable timestamped evidence in MongoDB.
+2. `gpt-5.6-luna` converts that evidence into the existing validated QA, Customer Voice, or Advisor Coaching report with `medium` reasoning.
+3. If the report fails deterministic validation, only the text report stage is retried with `gpt-5.6-terra`. When a project has no Terra access, Luna receives one corrected retry with `high` reasoning instead; the audio is never submitted again.
+
+Evidence is isolated per user and keyed by the recording hash, extractor model, and evidence version. It can be reused across report modes and future re-audits. The existing six-hour full-report cache remains active. Report history stores the actual models, reasoning effort, request/token usage, evidence-cache status, and an estimated API cost. A full-report cache hit costs no new provider request.
+
+Configure the model path with `OPENAI_MODELS`, `OPENAI_REPORT_MODELS`, and `OPENAI_REASONING_EFFORT`. Model availability is controlled by the user’s OpenAI project; unavailable fallback models are skipped safely.
+
 ## Backup, migration, and upgrade
 
 Always inspect and back up before migration:

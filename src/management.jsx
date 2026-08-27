@@ -148,7 +148,6 @@ const bnCopy = {
     "প্রত্যেক ব্যবহারকারী নিজের API key ব্যক্তিগতভাবে যোগ করবেন।",
   "Temporary password": "অস্থায়ী পাসওয়ার্ড",
   Accounts: "অ্যাকাউন্ট",
-  Admin: "অ্যাডমিন",
   Deactivate: "নিষ্ক্রিয় করুন",
   Reactivate: "সক্রিয় করুন",
   "Reset password": "পাসওয়ার্ড রিসেট",

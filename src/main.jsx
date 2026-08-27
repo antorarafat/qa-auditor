@@ -887,7 +887,7 @@ function AppContent({ language, toggleLanguage }) {
                     <Button
                       className="analyze-button"
                       size="lg"
-                      onClick={analyze}
+                      onClick={() => analyze(false)}
                       disabled={
                         busy ||
                         !files.length ||

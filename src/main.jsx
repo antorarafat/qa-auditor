@@ -1049,14 +1049,14 @@ function AppContent({ language, toggleLanguage }) {
                       <Button variant="outline" size="sm" onClick={exportPdf}>
                         <FileDown size={15} /> {t.downloadPdf}
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => analyze(true)} disabled={busy || !files.length}>
-                        <RefreshCw size={15} /> {t.reAudit}
-                      </Button>
                       <Button variant="outline" size="sm" onClick={exportWord}>
                         <FileText size={15} /> {t.downloadWord}
                       </Button>
                       <Button variant="outline" size="sm" onClick={copyReport}>
                         <Check size={15} /> {t.copy}
+                      </Button>
+                      <Button size="sm" onClick={() => analyze(true)} disabled={busy || !files.length}>
+                        <RefreshCw size={15} /> {t.reAudit}
                       </Button>
                     </div>
                   </div>

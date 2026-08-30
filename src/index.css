@@ -189,6 +189,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .product-description-list { border: 0; box-shadow: 0 14px 45px rgba(23, 32, 51, .06); }
 .step-label { width: fit-content; margin-bottom: 9px; padding: 4px 8px; border-radius: 99px; background: var(--primary-soft); color: var(--primary-dark); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .catalog-setup { display: grid; gap: 24px; }
+.catalog-setup .inline-create { display: grid; grid-template-columns: minmax(0, 1fr); }
+.catalog-setup .inline-create > .ui-button { width: 100%; }
 .inline-create { display: flex; width: 100%; max-width: 100%; gap: 8px; }
 .inline-create, .inline-create > * { min-width: 0; max-width: 100%; }
 .inline-create > .ui-input { flex: 1 1 0; }

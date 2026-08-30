@@ -144,6 +144,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .workspace-heading h1 { margin: 0; color: #111827; font-size: clamp(28px, 3vw, 36px); letter-spacing: -.035em; }
 .workspace-heading p { margin: 7px 0 0; color: var(--muted); font-size: 14px; }
 .management-grid { display: grid; gap: 20px; align-items: start; }
+.management-grid > *, .product-admin, .product-admin > *, .card-content, .card-header { min-width: 0; }
 .management-grid.two { grid-template-columns: minmax(300px, .8fr) minmax(0, 1.2fr); }
 .management-grid.scorecard-grid { grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr); }
 .management-grid .ui-card, .narrow-card, .history-detail { border: 0; box-shadow: 0 14px 45px rgba(23, 32, 51, .06); }
@@ -191,6 +192,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .inline-create { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .taxonomy-preview { display: grid; gap: 7px; padding-top: 4px; }
 .taxonomy-preview > div { display: grid; gap: 3px; padding: 10px 12px; border-radius: 9px; background: var(--soft); }
+.catalog-row-actions { min-width: 0; display: flex !important; align-items: center; justify-content: space-between; gap: 8px; }
+.catalog-sub-row { min-width: 0; display: flex !important; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+.catalog-sub-row > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .taxonomy-preview strong { font-size: 12px; }
 .taxonomy-preview span { color: var(--muted); font-size: 11px; }
 .builder-category { display: grid; gap: 9px; margin: 8px 0; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: #fafbfc; }
@@ -407,6 +411,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .admin-row { grid-template-columns: 1fr auto; }
   .inline-reset { grid-template-columns: 1fr; }
   .inline-create { grid-template-columns: 1fr; }
+  .management-grid.two, .management-grid.scorecard-grid { gap: 14px; }
+  .catalog-setup { gap: 18px; }
+  .catalog-row-actions, .catalog-sub-row { align-items: flex-start; }
+  .catalog-row-actions .ui-button, .catalog-sub-row .ui-button { flex: none; }
   .admin-row > .ui-button { grid-column: auto; }
   .catalog-row { grid-template-columns: 1fr auto; }
   .catalog-row > .ui-button:last-child { grid-column: 1 / -1; justify-self: start; }

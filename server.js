@@ -959,8 +959,9 @@ function createApp(options = {}) {
     catch (error) { console.error('Analysis job lookup failed:', error.message); return res.status(503).json({ error: 'Analysis status is temporarily unavailable.' }); }
   });
 
-  if (fs.existsSync(DIST_INDEX_PATH)) { app.use('/assets', express.static(path.join(DIST_DIR, 'assets'), { index: false })); app.get('/favicon.svg', (req, res) => res.sendFile(path.join(DIST_DIR, 'favicon.svg'))); app.get(['/', '/setup'], (req, res) => res.sendFile(DIST_INDEX_PATH)); }
-  else app.get(['/', '/setup', '/10ms-qa-audit-portal.html'], (req, res) => res.sendFile(INDEX_PATH));
+  const spaRoutes = ['/', '/setup', '/audit', '/report', '/summary', '/admin', '/password', '/network', '/products', '/company', '/scorecards'];
+  if (fs.existsSync(DIST_INDEX_PATH)) { app.use('/assets', express.static(path.join(DIST_DIR, 'assets'), { index: false })); app.get('/favicon.svg', (req, res) => res.sendFile(path.join(DIST_DIR, 'favicon.svg'))); app.get(spaRoutes, (req, res) => res.sendFile(DIST_INDEX_PATH)); }
+  else app.get([...spaRoutes, '/10ms-qa-audit-portal.html'], (req, res) => res.sendFile(INDEX_PATH));
   app.use((req, res) => res.status(404).json({ error: 'Not found.' })); return app;
 }
 

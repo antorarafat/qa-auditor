@@ -148,6 +148,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .management-grid.two { grid-template-columns: minmax(300px, .8fr) minmax(0, 1.2fr); }
 .management-grid.scorecard-grid { grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr); }
 .management-grid .ui-card, .narrow-card, .history-detail { border: 0; box-shadow: 0 14px 45px rgba(23, 32, 51, .06); }
+.management-grid .ui-card { overflow: hidden; }
 .narrow-card { max-width: 620px; }
 .stack-form { display: grid; gap: 9px; }
 .network-rule-group { display: grid; gap: 8px; }
@@ -189,6 +190,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .product-description-list { border: 0; box-shadow: 0 14px 45px rgba(23, 32, 51, .06); }
 .step-label { width: fit-content; margin-bottom: 9px; padding: 4px 8px; border-radius: 99px; background: var(--primary-soft); color: var(--primary-dark); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .catalog-setup { display: grid; gap: 24px; }
+.catalog-setup > .stack-form { width: 100%; max-width: 100%; min-width: 0; overflow: hidden; }
 .catalog-setup .inline-create { display: grid; grid-template-columns: minmax(0, 1fr); }
 .catalog-setup .inline-create > .ui-button { width: 100%; }
 .inline-create { display: flex; width: 100%; max-width: 100%; gap: 8px; }

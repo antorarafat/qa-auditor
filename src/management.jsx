@@ -235,6 +235,16 @@ const bnCopy = {
   Edit: "সম্পাদনা",
   Restore: "ফিরিয়ে আনুন",
   Archive: "আর্কাইভ",
+  Delete: "মুছে ফেলুন",
+  "Description deleted.": "বিবরণ মুছে ফেলা হয়েছে।",
+  "Category and its descriptions deleted.": "ক্যাটাগরি ও এর বিবরণ মুছে ফেলা হয়েছে।",
+  "Sub-category and its description deleted.": "সাব-ক্যাটাগরি ও এর বিবরণ মুছে ফেলা হয়েছে।",
+  "Delete this category?": "এই ক্যাটাগরি মুছে ফেলবেন?",
+  "Delete this sub-category?": "এই সাব-ক্যাটাগরি মুছে ফেলবেন?",
+  "Delete this description?": "এই বিবরণ মুছে ফেলবেন?",
+  "This permanently removes the category, its sub-categories, and descriptions. Historical reports are not changed.": "এটি ক্যাটাগরি, সাব-ক্যাটাগরি ও বিবরণ স্থায়ীভাবে মুছে দেবে। পুরনো রিপোর্ট বদলাবে না।",
+  "This permanently removes the sub-category and its description. Historical reports are not changed.": "এটি সাব-ক্যাটাগরি ও বিবরণ স্থায়ীভাবে মুছে দেবে। পুরনো রিপোর্ট বদলাবে না।",
+  "This permanently removes the product description. Historical reports are not changed.": "এটি প্রোডাক্ট বিবরণ স্থায়ীভাবে মুছে দেবে। পুরনো রিপোর্ট বদলাবে না।",
   "Category created. You can now add its sub-categories.":
     "ক্যাটাগরি তৈরি হয়েছে। এখন সাব-ক্যাটাগরি যোগ করতে পারবেন।",
   "Sub-category created. It is now available in the description dropdown.":
@@ -1363,6 +1373,19 @@ function ProductsAdmin() {
     }
   }
 
+  async function removeDescription(item) {
+    try { await api(`/api/admin/product-briefs/${item.id}`, { method: "DELETE" }); if (editId === item.id) { setEditId(""); setForm(emptyBrief); } setMessage(tr("Description deleted.")); await load(); }
+    catch (error) { setMessage(error.message); }
+  }
+  async function removeCategory(category) {
+    try { await api(`/api/admin/product-categories/${category.id}`, { method: "DELETE" }); setMessage(tr("Category and its descriptions deleted.")); await load(); }
+    catch (error) { setMessage(error.message); }
+  }
+  async function removeSubCategory(subCategory) {
+    try { await api(`/api/admin/product-subcategories/${subCategory.id}`, { method: "DELETE" }); setMessage(tr("Sub-category and its description deleted.")); await load(); }
+    catch (error) { setMessage(error.message); }
+  }
+
   function edit(item) {
     setEditId(item.id);
     setForm({
@@ -1467,11 +1490,9 @@ function ProductsAdmin() {
             <div className="taxonomy-preview">
               {taxonomy.map((category) => (
                 <div key={category.id}>
-                  <strong>{category.name}</strong>
+                  <div className="catalog-row-actions"><strong>{category.name}</strong><ConfirmDialog trigger={<Button variant="ghost" size="sm">{tr("Delete")}</Button>} title={tr("Delete this category?")} description={tr("This permanently removes the category, its sub-categories, and descriptions. Historical reports are not changed.")} confirmLabel={tr("Delete")} destructive onConfirm={() => removeCategory(category)} /></div>
                   <span>
-                    {category.subCategories
-                      ?.map((item) => item.name)
-                      .join(", ") || tr("No sub-categories yet")}
+                    {category.subCategories?.length ? category.subCategories.map((item) => <span className="catalog-sub-row" key={item.id}><span>{item.name}</span><ConfirmDialog trigger={<Button variant="ghost" size="sm">{tr("Delete")}</Button>} title={tr("Delete this sub-category?")} description={tr("This permanently removes the sub-category and its description. Historical reports are not changed.")} confirmLabel={tr("Delete")} destructive onConfirm={() => removeSubCategory(item)} /></span>) : tr("No sub-categories yet")}
                   </span>
                 </div>
               ))}
@@ -1583,6 +1604,7 @@ function ProductsAdmin() {
                 <Archive size={14} />
                 {item.archived ? tr("Restore") : tr("Archive")}
               </Button>
+              <ConfirmDialog trigger={<Button variant="ghost" size="sm">{tr("Delete")}</Button>} title={tr("Delete this description?")} description={tr("This permanently removes the product description. Historical reports are not changed.")} confirmLabel={tr("Delete")} destructive onConfirm={() => removeDescription(item)} />
             </div>
           ))}
         </CardContent>

@@ -166,6 +166,14 @@ const bnCopy = {
   "Company name saved for future reports.":
     "ভবিষ্যৎ রিপোর্টের জন্য কোম্পানির নাম সেভ হয়েছে।",
   "Save company": "কোম্পানি সেভ করুন",
+  "Network access": "নেটওয়ার্ক অ্যাক্সেস",
+  "This policy protects the entire application. Keep your current address allowed before saving.": "এই নীতি পুরো অ্যাপ্লিকেশন সুরক্ষিত রাখে। সেভ করার আগে আপনার বর্তমান ঠিকানা অনুমোদিত রাখুন।",
+  "Allow all networks": "সব নেটওয়ার্ক অনুমোদন করুন",
+  "Allowed IPv4 ranges": "অনুমোদিত IPv4 রেঞ্জ",
+  "Allowed IPv6 ranges": "অনুমোদিত IPv6 রেঞ্জ",
+  "One address or CIDR range per line. Wildcard access uses 0.0.0.0/0 and ::/0." : "প্রতি লাইনে একটি ঠিকানা বা CIDR রেঞ্জ। সব নেটওয়ার্কের জন্য 0.0.0.0/0 এবং ::/0 ব্যবহার করুন।",
+  "Save network policy": "নেটওয়ার্ক নীতি সেভ করুন",
+  "Network policy saved.": "নেটওয়ার্ক নীতি সেভ হয়েছে।",
   "Step 1": "ধাপ ১",
   "Create the catalog structure": "ক্যাটালগ কাঠামো তৈরি করুন",
   "Create a category first, then add one or more sub-categories.":
@@ -1221,6 +1229,14 @@ function CompanyAdmin() {
   );
 }
 
+function NetworkAccessAdmin() {
+  const tr = useTr();
+  const [enabled, setEnabled] = useState(true); const [ipv4, setIpv4] = useState("0.0.0.0/0"); const [ipv6, setIpv6] = useState("::/0"); const [message, setMessage] = useState("");
+  useEffect(() => { api("/api/admin/network-access").then(({ networkAccess }) => { setEnabled(networkAccess.enabled !== false); setIpv4((networkAccess.ipv4 || []).join("\n")); setIpv6((networkAccess.ipv6 || []).join("\n")); }).catch(error => setMessage(error.message)); }, []);
+  async function save(event) { event.preventDefault(); try { await api("/api/admin/network-access", body("PUT", { enabled, ipv4: ipv4.split(/[\n,]+/).map(value => value.trim()).filter(Boolean), ipv6: ipv6.split(/[\n,]+/).map(value => value.trim()).filter(Boolean) })); setMessage(tr("Network policy saved.")); } catch (error) { setMessage(error.message); } }
+  return <Card className="narrow-card"><CardHeader><CardTitle>{tr("Network access")}</CardTitle><CardDescription>{tr("This policy protects the entire application. Keep your current address allowed before saving.")}</CardDescription></CardHeader><CardContent><form className="stack-form" onSubmit={save}><label className="switch-row"><input type="checkbox" checked={!enabled} onChange={event => setEnabled(!event.target.checked)} /><span>{tr("Allow all networks")}</span></label><Label>{tr("Allowed IPv4 ranges")}</Label><Textarea rows={4} value={ipv4} onChange={event => setIpv4(event.target.value)} /><Label>{tr("Allowed IPv6 ranges")}</Label><Textarea rows={3} value={ipv6} onChange={event => setIpv6(event.target.value)} /><small>{tr("One address or CIDR range per line. Wildcard access uses 0.0.0.0/0 and ::/0.")}</small><Button>{tr("Save network policy")}</Button><Notice message={message} error={/could|required|valid|current/i.test(message)} /></form></CardContent></Card>;
+}
+
 function ProductsAdmin() {
   const tr = useTr();
   const emptyBrief = { categoryId: "", subCategoryId: "", brief: "" };
@@ -1868,6 +1884,7 @@ export function AdminView() {
   const views = {
     users: <UsersAdmin />,
     company: <CompanyAdmin />,
+    network: <NetworkAccessAdmin />,
     products: <ProductsAdmin />,
     scorecards: <ScorecardsAdmin />,
   };
@@ -1881,6 +1898,7 @@ export function AdminView() {
           {[
             ["users", tr("Users")],
             ["company", tr("Company")],
+            ["network", tr("Network access")],
             ["products", tr("Products")],
             ["scorecards", tr("Scorecards")],
           ].map(([value, label]) => (

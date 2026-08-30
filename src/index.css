@@ -149,6 +149,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .management-grid .ui-card, .narrow-card, .history-detail { border: 0; box-shadow: 0 14px 45px rgba(23, 32, 51, .06); }
 .narrow-card { max-width: 620px; }
 .stack-form { display: grid; gap: 9px; }
+.switch-row { display: flex; align-items: center; gap: 10px; font-weight: 650; }
+.switch-row input { width: 18px; height: 18px; accent-color: var(--accent); }
 .stack-form.compact { margin-top: 22px; }
 .stack-form small { color: var(--muted); line-height: 1.5; }
 .stack-form > .ui-label:not(:first-child) { margin-top: 7px; }

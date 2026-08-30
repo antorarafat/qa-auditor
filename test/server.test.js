@@ -4,10 +4,19 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const request = require('supertest');
-const { createApp, createProviderClient, normalizeAnalysisInput, parseQaRubric, qaPrompt, qaMarkdownPrompt, scorecardForEditor } = require('../server');
+const { createApp, createProviderClient, normalizeAnalysisInput, parseQaRubric, qaPrompt, qaMarkdownPrompt, scorecardForEditor, ipInCidr, networkIpAllowed } = require('../server');
 const { loadTemplate, loadAndValidateTemplates, renderTemplate, validateQaResult, renderQaCall, parseQaMarkdownReport, qaSchema } = require('../lib/audit-pipeline');
 
 const RUBRIC = `১. Greetings (৫ নম্বর)\n- Greetings (২)\n- Permission (৩)\n\n২. Closing (৫ নম্বর)\n- Summary (২)\n- Goodbye (৩)\n\nCritical Errors\n- Wrong information\n- Rudeness`;
+
+test('network allowlist matches wildcard and CIDR addresses', () => {
+  assert.equal(ipInCidr('192.168.99.158', '192.168.99.0/24'), true);
+  assert.equal(ipInCidr('10.0.0.1', '192.168.99.0/24'), false);
+  assert.equal(ipInCidr('2001:db8::42', '2001:db8::/32'), true);
+  assert.equal(networkIpAllowed('10.0.0.1', { enabled: true, ipv4: ['0.0.0.0/0'] }), true);
+  assert.equal(networkIpAllowed('10.0.0.1', { enabled: true, ipv4: ['192.168.1.0/24'] }), false);
+  assert.equal(networkIpAllowed('10.0.0.1', { enabled: false, ipv4: ['192.168.1.0/24'] }), true);
+});
 
 function fakeStore(options = {}) {
   const users = [{ email: 'user@example.com', password: 'plain-password', name: 'Test User', companyName: 'Robi', geminiKey: 'gemini-secret', openaiKey: 'openai-secret', usage: 0, defaultParameter: 'Outbound', defaultParameterColumn: 6 }];

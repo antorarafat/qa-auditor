@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const net = require('node:net');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -81,6 +82,16 @@ function createSessionManager() {
 function setSessionCookie(res, token, secure) { res.setHeader('Set-Cookie', `qa_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${secure ? '; Secure' : ''}`); }
 function clearSessionCookie(res, secure) { res.setHeader('Set-Cookie', `qa_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure ? '; Secure' : ''}`); }
 function isSameOrigin(req, allowedOrigins) { const origin = req.get('origin'); return !origin || (allowedOrigins.length ? allowedOrigins.includes(origin) : origin === `${req.protocol}://${req.get('host')}`); }
+function normalizeClientIp(value) { const raw = String(value || '').trim().replace(/^\[|\]$/g, ''); return raw.startsWith('::ffff:') ? raw.slice(7) : raw; }
+function ipInCidr(ip, rule) {
+  const address = normalizeClientIp(ip); const candidate = String(rule || '').trim().toLowerCase();
+  if (candidate === '0.0.0.0' || candidate === '0.0.0.0/0' || candidate === '::' || candidate === '::/0') return true;
+  const slash = candidate.indexOf('/'); const base = slash >= 0 ? candidate.slice(0, slash) : candidate; const bits = net.isIP(base); if (!bits || net.isIP(address) !== bits) return false;
+  const prefix = slash >= 0 ? Number(candidate.slice(slash + 1)) : bits === 4 ? 32 : 128; if (!Number.isInteger(prefix) || prefix < 0 || prefix > bits * 32) return false;
+  const toBytes = value => { if (bits === 4) return value.split('.').map(Number); const halves = value.split('::'); const left = halves[0] ? halves[0].split(':').filter(Boolean) : []; const right = halves[1] ? halves[1].split(':').filter(Boolean) : []; const groups = halves.length > 1 ? [...left, ...Array(8 - left.length - right.length).fill('0'), ...right] : value.split(':'); return Buffer.from(groups.map(part => part.padStart(4, '0')).join('').match(/.{2}/g).map(hex => parseInt(hex, 16))); };
+  const a = toBytes(address); const b = toBytes(base); const full = Math.floor(prefix / 8); const remainder = prefix % 8; for (let i = 0; i < full; i += 1) if (a[i] !== b[i]) return false; return !remainder || (a[full] >> (8 - remainder)) === (b[full] >> (8 - remainder));
+}
+function networkIpAllowed(ip, access = {}) { if (access.enabled === false) return true; const rules = [...(access.ipv4 || []), ...(access.ipv6 || [])]; return !rules.length || rules.some(rule => ipInCidr(ip, rule)); }
 function validateAudioFiles(files) { if (!Array.isArray(files) || !files.length) throw new Error('Upload at least one audio file.'); return files.map(file => { if (!file || typeof file.data !== 'string' || !String(file.mimeType || '').startsWith('audio/')) throw new Error('Only audio files are supported.'); const buffer = Buffer.from(file.data, 'base64'); if (!buffer.length) throw new Error('Invalid audio data.'); const durationSeconds = Number(file.durationSeconds); return { data: file.data, mimeType: String(file.mimeType), name: String(file.name || 'audio').slice(0, 200), size: buffer.length, sha256: crypto.createHash('sha256').update(buffer).digest('hex'), durationSeconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? Number(durationSeconds.toFixed(1)) : null }; }); }
 function parseJsonText(text) { const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''); try { return JSON.parse(cleaned); } catch { const start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}'); if (start >= 0 && end > start) { try { return JSON.parse(cleaned.slice(start, end + 1)); } catch {} } throw providerError('The AI returned malformed structured JSON.', 'invalid_response', true); } }
 function openAiSchema(schema) {
@@ -799,7 +810,13 @@ function createApp(options = {}) {
   async function createSession(user, activeParameter) { return dataStore.createSession ? dataStore.createSession(user, activeParameter, SESSION_TTL_MS) : sessions.create(user.email, activeParameter); }
   async function destroySession(token) { return dataStore.destroySession ? dataStore.destroySession(token) : sessions.destroy(token); }
   async function setActiveParameter(token, parameter) { return dataStore.setSessionParameter ? dataStore.setSessionParameter(token, parameter) : sessions.setParameter(token, parameter); }
-  app.disable('x-powered-by'); app.set('trust proxy', options.trustProxy ?? (process.env.NODE_ENV === 'production' ? 1 : false)); app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false })); app.use(async (req, res, next) => {
+  app.disable('x-powered-by'); app.set('trust proxy', options.trustProxy ?? (process.env.NODE_ENV === 'production' ? 1 : false)); app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+  app.use(async (req, res, next) => {
+    if (req.path === '/healthz' || process.env.NETWORK_ALLOWLIST_DISABLED === 'true') return next();
+    try { const access = await dataStore.getNetworkAccess?.() || { enabled: true, ipv4: ['0.0.0.0/0'], ipv6: ['::/0'] }; if (!networkIpAllowed(req.ip, access)) return res.status(403).json({ error: 'This network address is not allowed.', errorCode: 'network_not_allowed' }); return next(); }
+    catch (error) { console.error('Network allowlist check failed:', error.message); return res.status(503).json({ error: 'Network access policy is temporarily unavailable.' }); }
+  });
+  app.use(async (req, res, next) => {
     try { const token = parseCookies(req.headers.cookie).qa_session; req.sessionToken = token; req.session = token ? (dataStore.getSession ? await dataStore.getSession(token) : sessions.get(token)) : null; req.currentUser = req.session ? await dataStore.findByEmail(req.session.email) : null; if (req.session && (!req.currentUser || req.currentUser.active === false || req.currentUser.status === 'inactive')) { await destroySession(token); req.session = null; req.currentUser = null; clearSessionCookie(res, secureCookies); } next(); }
     catch (error) { console.error('Session middleware failed:', error.message); res.status(503).json({ error: 'Authentication service is temporarily unavailable.' }); }
   });
@@ -896,6 +913,12 @@ function createApp(options = {}) {
   app.post('/api/admin/users/:id/reset-password', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res) => { if (String(req.currentUser.id) === String(req.params.id)) return res.status(400).json({ error: 'Use account settings to change your own password.' }); try { await dataStore.changePassword(req.params.id, String(req.body?.temporaryPassword || ''), true); return res.json({ ok: true }); } catch (error) { return res.status(400).json({ error: error.message }); } });
   app.get('/api/admin/company', requireAuth, requireReady, requireAdmin, async (req, res) => res.json(await dataStore.getCompany()));
   app.put('/api/admin/company', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res) => { const companyName = cleanText(req.body?.companyName, 160); if (companyName.length < 2) return res.status(400).json({ error: 'Company name is required.' }); return res.json(await dataStore.updateCompany(companyName)); });
+  app.get('/api/admin/network-access', requireAuth, requireReady, requireAdmin, async (req, res) => res.json({ networkAccess: await dataStore.getNetworkAccess() }));
+  app.put('/api/admin/network-access', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonAdmin, async (req, res) => {
+    const input = req.body?.networkAccess || req.body || {}; const ipv4 = Array.isArray(input.ipv4) ? [...new Set(input.ipv4.map(value => String(value).trim()).filter(Boolean))] : []; const ipv6 = Array.isArray(input.ipv6) ? [...new Set(input.ipv6.map(value => String(value).trim()).filter(Boolean))] : [];
+    if (ipv4.some(rule => !/^\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,2})?$/.test(rule) || !ipInCidr(rule.split('/')[0], rule)) || ipv6.some(rule => !net.isIP(rule.split('/')[0]) || net.isIP(rule.split('/')[0]) !== 6 || (rule.includes('/') && (!Number.isInteger(Number(rule.split('/')[1])) || Number(rule.split('/')[1]) < 0 || Number(rule.split('/')[1]) > 128)))) return res.status(400).json({ error: 'Enter valid IPv4/IPv6 addresses or CIDR ranges.' });
+    const proposed = { enabled: input.enabled !== false, ipv4, ipv6 }; if (proposed.enabled && !networkIpAllowed(req.ip, proposed)) return res.status(400).json({ error: 'Keep your current network address allowed before saving this policy.' }); return res.json({ networkAccess: await dataStore.updateNetworkAccess(proposed) });
+  });
   app.get('/api/admin/product-taxonomy', requireAuth, requireReady, requireAdmin, async (req, res) => res.json({ categories: await dataStore.listProductTaxonomy() }));
   app.post('/api/admin/product-categories', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res) => { const name = cleanText(req.body?.name, 200); if (!name) return res.status(400).json({ error: 'Category name is required.' }); try { return res.status(201).json({ category: await dataStore.createProductCategory(name) }); } catch (error) { return res.status(error.code === 11000 ? 409 : 400).json({ error: error.code === 11000 ? 'That category already exists.' : error.message }); } });
   app.put('/api/admin/product-categories/:id', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res) => { try { await dataStore.setProductCategoryArchived(req.params.id, Boolean(req.body?.archived)); return res.json({ ok: true }); } catch (error) { return res.status(400).json({ error: error.message }); } });
@@ -945,4 +968,4 @@ if (require.main === module) {
     createApp({ dataStore }).listen(port, () => console.log(`QA Auditor listening on port ${port}`));
   })().catch(error => { console.error(`Startup failed: ${error.message}`); process.exit(1); });
 }
-module.exports = { createApp, createMongoStore, createProviderClient, createSessionManager, createAnalysisCache, createAnalysisQueue, normalizeAnalysisInput, normalizeEmail, qaPrompt, qaMarkdownPrompt, scorecardDocument, scorecardForEditor, parseQaRubric: pipeline.parseQaRubric };
+module.exports = { createApp, createMongoStore, createProviderClient, createSessionManager, createAnalysisCache, createAnalysisQueue, normalizeAnalysisInput, normalizeEmail, qaPrompt, qaMarkdownPrompt, scorecardDocument, scorecardForEditor, parseQaRubric: pipeline.parseQaRubric, ipInCidr, networkIpAllowed };

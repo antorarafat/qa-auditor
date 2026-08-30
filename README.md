@@ -122,6 +122,10 @@ Do not put secrets or personal customer data in a scorecard.
 - At least one active administrator must remain.
 - Users see their own reports. Administrators may filter all reports.
 
+### Network access policy
+
+Administrators can open **Admin → Network access** to protect the entire application with IPv4/IPv6 addresses or CIDR ranges. A new installation starts with `0.0.0.0/0` and `::/0` enabled so the first administrator can connect from any VPS or network. Keep the current address in the list before saving a restrictive policy. The policy is stored in MongoDB and applies server-side to login, APIs, and the application UI. `localhost` and `127.0.0.1` are not automatically special once a restrictive policy is saved; add them if local access is needed. For emergency recovery, set `NETWORK_ALLOWLIST_DISABLED=true` in `.env`, restart the service, repair the policy, and set it back to `false`.
+
 ## Queue, cache, and Gemini free tier
 
 - `AI_MIN_START_INTERVAL_MS` spaces requests by API-key fingerprint and primary model.

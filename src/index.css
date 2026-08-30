@@ -146,6 +146,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .management-grid { display: grid; gap: 20px; align-items: start; }
 .management-grid > *, .product-admin, .product-admin > *, .card-content, .card-header { min-width: 0; }
 .management-grid.two { grid-template-columns: minmax(300px, .8fr) minmax(0, 1.2fr); }
+/* Keep the catalog editor cards independent so long labels/controls can never
+   paint across the neighboring card. The editor remains easy to scan as a
+   vertical two-step workflow at every viewport width. */
+.product-admin > .management-grid.two { grid-template-columns: minmax(0, 1fr); }
 .management-grid.scorecard-grid { grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr); }
 .management-grid .ui-card, .narrow-card, .history-detail { border: 0; box-shadow: 0 14px 45px rgba(23, 32, 51, .06); }
 .management-grid .ui-card { overflow: hidden; }

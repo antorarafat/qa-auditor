@@ -1191,18 +1191,32 @@ function LoginScreen({
   const [showPassword, setShowPassword] = useState(false);
   return (
     <div className="login-shell">
-      <Card className="login-card">
-        <div className="login-brand">
-          <strong>QA Auditor</strong>
-          <LanguageToggle language={language} onClick={toggleLanguage} />
+      <div className="login-hero" aria-hidden="true">
+        <div className="login-hero-grid" />
+        <div className="login-hero-inner">
+          <div className="login-hero-brand"><span className="login-hero-mark"><Check size={17} /></span><strong>QA Auditor</strong></div>
+          <div className="login-hero-copy">
+            <span className="login-hero-badge"><Sparkles size={13} /> Call quality workspace</span>
+            <h1>Turn every call into<br /><em>clear coaching.</em></h1>
+            <p>Upload recordings, evaluate consistently, and give every advisor feedback they can act on.</p>
+            <div className="login-hero-cards">
+              <div className="login-hero-card card-a"><span>QA scorecard</span><strong>92 / 100</strong></div>
+              <div className="login-hero-card card-b"><span>Advisor coaching</span><strong>Actionable insights</strong></div>
+              <div className="login-hero-card card-c"><span>Customer voice</span><strong>Find the signal</strong></div>
+            </div>
+          </div>
         </div>
-        <Separator />
-        <CardHeader>
-          <CardTitle>{t.signIn}</CardTitle>
-          <CardDescription>{t.signInDescription}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onSubmit} className="login-form">
+      </div>
+      <Card className="login-card">
+        <div className="login-form-panel">
+          <div className="login-form-kicker">{language === "bn" ? "আবার স্বাগতম" : "Welcome back"}</div>
+          <div className="login-brand"><strong>QA Auditor</strong><LanguageToggle language={language} onClick={toggleLanguage} /></div>
+          <CardHeader>
+            <CardTitle>{t.signIn}</CardTitle>
+            <CardDescription>{t.signInDescription}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={onSubmit} className="login-form">
             <Label htmlFor="email">{t.email}</Label>
             <Input
               id="email"
@@ -1245,8 +1259,9 @@ function LoginScreen({
             <Button type="submit" size="lg" disabled={state.loading}>
               {state.loading ? t.signingIn : t.login}
             </Button>
-          </form>
-        </CardContent>
+            </form>
+          </CardContent>
+        </div>
       </Card>
     </div>
   );

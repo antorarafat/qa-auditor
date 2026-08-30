@@ -1194,9 +1194,8 @@ function LoginScreen({
       <div className="login-hero" aria-hidden="true">
         <div className="login-hero-grid" />
         <div className="login-hero-inner">
-          <div className="login-hero-brand"><span className="login-hero-mark"><Check size={17} /></span><strong>QA Auditor</strong></div>
+          <div className="login-hero-brand"><span className="login-hero-mark"><AudioLines size={18} /></span><strong>QA Auditor</strong></div>
           <div className="login-hero-copy">
-            <span className="login-hero-badge"><Sparkles size={13} /> Call quality workspace</span>
             <h1>Turn every call into<br /><em>clear coaching.</em></h1>
             <p>Upload recordings, evaluate consistently, and give every advisor feedback they can act on.</p>
             <div className="login-hero-cards">
@@ -1209,7 +1208,6 @@ function LoginScreen({
       </div>
       <Card className="login-card">
         <div className="login-form-panel">
-          <div className="login-form-kicker">{language === "bn" ? "আবার স্বাগতম" : "Welcome back"}</div>
           <div className="login-brand"><strong>QA Auditor</strong><LanguageToggle language={language} onClick={toggleLanguage} /></div>
           <CardHeader>
             <CardTitle>{language === "bn" ? "QA Auditor-এ সাইন ইন করুন" : "Sign in to QA Auditor"}</CardTitle>

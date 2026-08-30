@@ -48,6 +48,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .login-form-kicker { margin-bottom: 10px; color: #ff6d72; font-size: 12px; font-weight: 700; letter-spacing: .03em; }
 .login-form-panel .card-title { color: #e6e9ed; }
 .login-form-panel .card-description { color: #9da6b1; }
+.login-form-panel .ui-label { color: #e6e9ed; }
 .login-brand { display: flex; align-items: center; gap: 12px; padding: 18px 20px; }
 .login-brand > strong { flex: 1; font-size: 17px; }
 .login-form-panel .login-brand { display: none; }

@@ -189,7 +189,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .product-description-list { border: 0; box-shadow: 0 14px 45px rgba(23, 32, 51, .06); }
 .step-label { width: fit-content; margin-bottom: 9px; padding: 4px 8px; border-radius: 99px; background: var(--primary-soft); color: var(--primary-dark); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .catalog-setup { display: grid; gap: 24px; }
-.inline-create { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.inline-create { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 148px); gap: 8px; }
+.inline-create > .ui-button { min-width: 0; max-width: 100%; padding-left: 9px; padding-right: 9px; white-space: normal; line-height: 1.2; }
 .taxonomy-preview { display: grid; gap: 7px; padding-top: 4px; }
 .taxonomy-preview > div { display: grid; gap: 3px; padding: 10px 12px; border-radius: 9px; background: var(--soft); }
 .catalog-row-actions { min-width: 0; display: flex !important; align-items: center; justify-content: space-between; gap: 8px; }

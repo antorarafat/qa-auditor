@@ -375,15 +375,19 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 }
 
 @media (max-width: 640px) {
+  html, body { overflow-x: hidden; }
   .topbar { height: 64px; }
-  .topbar-inner, .page-container, .workspace-view { width: calc(100% - 28px); }
+  .topbar-inner, .page-container, .workspace-view { width: calc(100% - 24px); }
+  .topbar-inner { gap: 8px; }
   .brand-lockup .brand-mark { width: 36px; height: 36px; }
+  .brand-lockup { gap: 7px; }
+  .brand-lockup strong { max-width: 118px; font-size: 12px; }
   .topbar-actions { gap: 4px; }
   .account-chip { padding: 3px; }
   .account-chip .account-chevron { display: none; }
   .app-nav-shell { margin: 0; }
   .app-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; width: auto; max-width: none; justify-content: center; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-radius: 0; border-top: 1px solid var(--line); background: rgba(255,255,255,.96); }
-  .app-nav .ui-tabs-trigger { flex: 1; max-width: 130px; }
+  .app-nav .ui-tabs-trigger { flex: 1; max-width: 130px; min-height: 42px; padding: 0 6px; font-size: 11px; gap: 5px; }
   .page-container { padding: 30px 0 48px; }
   .page-heading { align-items: flex-start; margin-bottom: 20px; }
   .page-heading .ui-button { flex: none; }
@@ -408,6 +412,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .report-content h2 { font-size: 17px; }
   .workspace-view { padding: 30px 0 84px; }
   .workspace-heading { display: grid; }
+  .workspace-heading .form-actions { width: 100%; flex-wrap: wrap; }
+  .workspace-heading .form-actions .ui-button { flex: 1 1 auto; }
   .form-grid, .report-filters, .report-facts { grid-template-columns: 1fr; }
   .admin-row { grid-template-columns: 1fr auto; }
   .inline-reset { grid-template-columns: 1fr; }
@@ -423,6 +429,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .builder-row .ui-button { grid-column: 1 / -1; justify-self: start; }
   .history-row { grid-template-columns: auto minmax(0, 1fr) auto; }
   .history-meta { grid-column: 2 / 4; text-align: left; }
+  .report-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .report-table { min-width: 760px; }
+  .report-filters .multi-select-chips button { max-width: calc(100vw - 64px); }
 }
 
 @media print {

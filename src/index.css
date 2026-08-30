@@ -376,13 +376,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 @media (max-width: 640px) {
   html, body { overflow-x: hidden; }
-  .topbar { height: 64px; }
+  .topbar { height: 64px; backdrop-filter: none; }
   .topbar-inner, .page-container, .workspace-view { width: calc(100% - 24px); }
   .topbar-inner { gap: 8px; }
   .brand-lockup .brand-mark { width: 36px; height: 36px; }
-  .brand-lockup { gap: 7px; }
+  .brand-lockup { flex: 1 1 auto; min-width: 0; gap: 7px; }
   .brand-lockup strong { max-width: 118px; font-size: 12px; }
-  .topbar-actions { gap: 4px; }
+  .topbar-actions { flex: none; gap: 4px; }
   .account-chip { padding: 3px; }
   .account-chip .account-chevron { display: none; }
   .app-nav-shell { margin: 0; }

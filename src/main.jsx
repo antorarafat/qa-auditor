@@ -91,6 +91,8 @@ const viewPaths = {
   account: "/password",
   "admin-network": "/network",
   "admin-products": "/products",
+  "admin-company": "/company",
+  "admin-scorecards": "/scorecards",
 };
 function viewFromPath(pathname) {
   if (pathname === "/" || pathname === "") return "audit";
@@ -99,11 +101,13 @@ function viewFromPath(pathname) {
   if (pathname === "/password" || pathname === "/account") return "account";
   if (pathname === "/network") return "admin-network";
   if (pathname === "/products") return "admin-products";
+  if (pathname === "/company") return "admin-company";
+  if (pathname === "/scorecards") return "admin-scorecards";
   if (pathname === "/admin") return "admin";
   return "audit";
 }
 function adminTabPath(tab) {
-  return tab === "network" ? "admin-network" : tab === "products" ? "admin-products" : "admin";
+  return tab === "network" ? "admin-network" : tab === "products" ? "admin-products" : tab === "company" ? "admin-company" : tab === "scorecards" ? "admin-scorecards" : "admin";
 }
 
 const copy = {
@@ -740,7 +744,7 @@ function AppContent({ language, toggleLanguage }) {
               <span>QA Auditor</span>
             </div>
           </div>
-          <Tabs className="app-nav-shell" value={view === "admin-network" || view === "admin-products" ? "admin" : view} onValueChange={navigateView}>
+          <Tabs className="app-nav-shell" value={["audit", "reports", "summary"].includes(view) ? view : undefined} onValueChange={navigateView}>
             <TabsList className="app-nav" aria-label={t.auditTab}>
               <TabsTrigger value="audit">
                 <ClipboardCheck size={15} /> {t.auditTab}

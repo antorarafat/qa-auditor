@@ -127,6 +127,7 @@ const bnCopy = {
   "All processes": "সব প্রক্রিয়া",
   "Search agents": "এজেন্ট খুঁজুন",
   "Search processes": "প্রক্রিয়া খুঁজুন",
+  "Search modes": "রিপোর্টের ধরন খুঁজুন",
   "No results": "কোনো ফল নেই",
   "{count} selected": "{count}টি নির্বাচিত",
   "Calls evaluated": "মূল্যায়িত কল",
@@ -931,9 +932,14 @@ export function ReportsView({ user, onNewAudit }) {
           <MultiSelect id="report-agents" value={filters.agentName} onChange={(agentName) => setFilters({ ...filters, agentName })} options={options.agents} placeholder={tr("All agents")} searchPlaceholder={tr("Search agents")} emptyText={tr("No results") } selectedText={tr("{count} selected")} clearText={tr("Clear selections")} />
           <MultiSelect id="report-processes" value={filters.process} onChange={(process) => setFilters({ ...filters, process })} options={options.processes} placeholder={tr("All processes")} searchPlaceholder={tr("Search processes")} emptyText={tr("No results") } selectedText={tr("{count} selected")} clearText={tr("Clear selections")} />
           <MultiSelect
+            id="report-modes"
             aria-label={tr("Report mode")}
             value={reportTab === "summary" ? ["single"] : filters.mode}
             placeholder={tr("All modes")}
+            searchPlaceholder={tr("Search modes")}
+            emptyText={tr("No results")}
+            selectedText={tr("{count} selected")}
+            clearText={tr("Clear selections")}
             onChange={(mode) => setFilters({ ...filters, mode })}
             options={[
               { value: "single", label: tr("QA scorecard") },

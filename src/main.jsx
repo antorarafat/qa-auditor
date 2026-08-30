@@ -26,8 +26,10 @@ import {
   AlertTriangle,
   History,
   KeyRound,
+  Moon,
   Plus,
   ShieldCheck,
+  Sun,
 } from "lucide-react";
 import {
   Button,
@@ -183,6 +185,8 @@ const copy = {
     adminPanel: "Admin panel",
     accountSecurity: "Change Password/API",
     changeLanguage: "বাংলায় দেখুন",
+    darkTheme: "Material dark theme",
+    lightTheme: "Light theme",
     newAudit: "New Audit",
     reAudit: "Re-audit",
     profileMenu: "Open profile menu",
@@ -262,6 +266,8 @@ const copy = {
     adminPanel: "অ্যাডমিন প্যানেল",
     accountSecurity: "পাসওয়ার্ড/API পরিবর্তন",
     changeLanguage: "View in English",
+    darkTheme: "ম্যাটেরিয়াল ডার্ক থিম",
+    lightTheme: "লাইট থিম",
     newAudit: "নতুন অডিট",
     reAudit: "আবার অডিট করুন",
     profileMenu: "প্রোফাইল মেনু খুলুন",
@@ -303,7 +309,7 @@ const WORD_REPORT_STYLES = `
   .failed-result { color: #b42318; }
 `;
 
-function AppContent({ language, toggleLanguage }) {
+function AppContent({ language, toggleLanguage, theme, toggleTheme }) {
   const [user, setUser] = useState(null);
   const [loginState, setLoginState] = useState({ loading: true, error: "" });
   const [setupRequired, setSetupRequired] = useState(false);
@@ -732,7 +738,7 @@ function AppContent({ language, toggleLanguage }) {
       </ViewLoader>
     );
   return (
-    <div className="app-shell" id="top">
+    <div className={`app-shell${theme === "dark" ? " theme-dark" : ""}`} id="top">
       <header className="topbar">
         <div className="topbar-inner">
           <div className="brand-lockup">
@@ -796,6 +802,10 @@ function AppContent({ language, toggleLanguage }) {
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={toggleLanguage}>
                   <Globe2 size={16} /> {t.changeLanguage}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={toggleTheme}>
+                  {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+                  {theme === "dark" ? t.lightTheme : t.darkTheme}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem destructive onSelect={logout}>
@@ -1284,15 +1294,23 @@ function App() {
   const [language, setLanguage] = useState(
     () => localStorage.getItem("qa-language") || "en",
   );
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem("qa-theme") || "light",
+  );
   useEffect(() => {
     localStorage.setItem("qa-language", language);
     document.documentElement.lang = language === "bn" ? "bn" : "en";
   }, [language]);
+  useEffect(() => {
+    localStorage.setItem("qa-theme", theme);
+  }, [theme]);
   const toggleLanguage = () =>
     setLanguage((current) => (current === "en" ? "bn" : "en"));
+  const toggleTheme = () =>
+    setTheme((current) => (current === "dark" ? "light" : "dark"));
   return (
     <LanguageProvider language={language}>
-      <AppContent language={language} toggleLanguage={toggleLanguage} />
+      <AppContent language={language} toggleLanguage={toggleLanguage} theme={theme} toggleTheme={toggleTheme} />
     </LanguageProvider>
   );
 }

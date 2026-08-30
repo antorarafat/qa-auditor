@@ -43,7 +43,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .login-hero-card.card-a { left: 22px; top: 8px; transform: rotate(-4deg); }
 .login-hero-card.card-b { left: 150px; top: 70px; z-index: 2; transform: rotate(3deg); }
 .login-hero-card.card-c { left: 2px; top: 112px; transform: rotate(-2deg); }
-.login-card { width: min(42%, 680px); min-width: 440px; display: flex; align-items: center; justify-content: center; padding: 24px clamp(28px, 5vw, 72px); border: 0 !important; border-radius: 0; background: #191e25; color: #e6e9ed; box-shadow: none !important; }
+.login-card { width: min(42%, 680px); min-width: 440px; display: flex; align-items: center; justify-content: center; padding: 24px clamp(28px, 5vw, 72px); border: 0 !important; border-radius: 0; background: #191e25 !important; color: #e6e9ed; box-shadow: none !important; }
 .login-form-panel { width: min(100%, 380px); }
 .login-form-kicker { margin-bottom: 10px; color: #ff6d72; font-size: 12px; font-weight: 700; letter-spacing: .03em; }
 .login-form-panel .card-title { color: #e6e9ed; }

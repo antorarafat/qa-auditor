@@ -1212,7 +1212,7 @@ function LoginScreen({
           <div className="login-form-kicker">{language === "bn" ? "আবার স্বাগতম" : "Welcome back"}</div>
           <div className="login-brand"><strong>QA Auditor</strong><LanguageToggle language={language} onClick={toggleLanguage} /></div>
           <CardHeader>
-            <CardTitle>{t.signIn}</CardTitle>
+            <CardTitle>{language === "bn" ? "QA Auditor-এ সাইন ইন করুন" : "Sign in to QA Auditor"}</CardTitle>
             <CardDescription>{t.signInDescription}</CardDescription>
           </CardHeader>
           <CardContent>

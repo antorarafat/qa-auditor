@@ -772,6 +772,7 @@ export function ReportsView({ user, onNewAudit, summaryMode = false }) {
       setData((current) => ({
         items: append ? [...current.items, ...next.items] : next.items,
         nextCursor: next.nextCursor,
+        summary: next.summary || {},
       }));
     } catch (error) {
       setMessage(error.message);

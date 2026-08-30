@@ -65,6 +65,7 @@ const AccountView = lazyView("AccountView");
 const AdminView = lazyView("AdminView");
 const PasswordChange = lazyView("PasswordChange");
 const ReportsView = lazyView("ReportsView");
+const SummaryView = lazyView("ReportsView");
 const SetupScreen = lazyView("SetupScreen");
 function ViewLoader({ children }) {
   const language = useLanguage();
@@ -80,6 +81,29 @@ function ViewLoader({ children }) {
       {children}
     </React.Suspense>
   );
+}
+
+const viewPaths = {
+  audit: "/audit",
+  reports: "/report",
+  summary: "/summary",
+  admin: "/admin",
+  account: "/password",
+  "admin-network": "/network",
+  "admin-products": "/products",
+};
+function viewFromPath(pathname) {
+  if (pathname === "/" || pathname === "") return "audit";
+  if (pathname === "/report" || pathname === "/reports") return "reports";
+  if (pathname === "/summary") return "summary";
+  if (pathname === "/password" || pathname === "/account") return "account";
+  if (pathname === "/network") return "admin-network";
+  if (pathname === "/products") return "admin-products";
+  if (pathname === "/admin") return "admin";
+  return "audit";
+}
+function adminTabPath(tab) {
+  return tab === "network" ? "admin-network" : tab === "products" ? "admin-products" : "admin";
 }
 
 const copy = {
@@ -279,7 +303,7 @@ function AppContent({ language, toggleLanguage }) {
   const [user, setUser] = useState(null);
   const [loginState, setLoginState] = useState({ loading: true, error: "" });
   const [setupRequired, setSetupRequired] = useState(false);
-  const [view, setView] = useState("audit");
+  const [view, setView] = useState(() => viewFromPath(window.location.pathname));
   const [provider, setProvider] = useState("gemini");
   const [auditConfig, setAuditConfig] = useState({
     products: [],
@@ -307,6 +331,16 @@ function AppContent({ language, toggleLanguage }) {
   useEffect(() => {
     checkSession();
   }, []);
+  useEffect(() => {
+    const onPopState = () => setView(viewFromPath(window.location.pathname));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  function navigateView(next) {
+    setView(next);
+    const path = viewPaths[next] || "/audit";
+    if (window.location.pathname !== path) window.history.pushState({}, "", path);
+  }
   useEffect(() => {
     if (user) {
       loadAuditConfiguration();
@@ -477,7 +511,7 @@ function AppContent({ language, toggleLanguage }) {
       credentials: "same-origin",
     }).catch(() => {});
     setUser(null);
-    setView("audit");
+    navigateView("audit");
     setFiles([]);
     setResult(null);
     setParameter("");
@@ -493,7 +527,7 @@ function AppContent({ language, toggleLanguage }) {
   function startNewAudit() {
     runRef.current += 1;
     localStorage.removeItem("qa-active-job");
-    setView("audit");
+    navigateView("audit");
     setFiles([]);
     setResult(null);
     setBusy(false);
@@ -706,13 +740,16 @@ function AppContent({ language, toggleLanguage }) {
               <span>QA Auditor</span>
             </div>
           </div>
-          <Tabs className="app-nav-shell" value={view} onValueChange={setView}>
+          <Tabs className="app-nav-shell" value={view === "admin-network" || view === "admin-products" ? "admin" : view} onValueChange={navigateView}>
             <TabsList className="app-nav" aria-label={t.auditTab}>
               <TabsTrigger value="audit">
                 <ClipboardCheck size={15} /> {t.auditTab}
               </TabsTrigger>
               <TabsTrigger value="reports">
                 <History size={15} /> {t.reportsTab}
+              </TabsTrigger>
+              <TabsTrigger value="summary">
+                <FileText size={15} /> {t.summary || "Summary"}
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -746,11 +783,11 @@ function AppContent({ language, toggleLanguage }) {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {user.role === "admin" && (
-                  <DropdownMenuItem onSelect={() => setView("admin")}>
+                <DropdownMenuItem onSelect={() => navigateView("admin")}>
                     <ShieldCheck size={16} /> {t.adminPanel}
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onSelect={() => setView("account")}>
+                <DropdownMenuItem onSelect={() => navigateView("account")}>
                   <KeyRound size={16} /> {t.accountSecurity}
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={toggleLanguage}>
@@ -769,8 +806,12 @@ function AppContent({ language, toggleLanguage }) {
         <ViewLoader>
           {view === "reports" ? (
             <ReportsView user={user} onNewAudit={startNewAudit} />
+          ) : view === "summary" ? (
+            <SummaryView user={user} summaryMode onNewAudit={startNewAudit} />
           ) : view === "admin" && user.role === "admin" ? (
-            <AdminView />
+            <AdminView onTabChange={(tab) => navigateView(adminTabPath(tab))} />
+          ) : view.startsWith("admin-") && user.role === "admin" ? (
+            <AdminView initialTab={view.replace("admin-", "")} onTabChange={(tab) => navigateView(adminTabPath(tab))} />
           ) : view === "account" ? (
             <AccountView user={user} onSignedOut={logout} />
           ) : (

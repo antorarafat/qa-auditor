@@ -720,13 +720,13 @@ function dateText(value, language = "en") {
   }
 }
 
-export function ReportsView({ user, onNewAudit }) {
+export function ReportsView({ user, onNewAudit, summaryMode = false }) {
   const tr = useTr();
   const language = useLanguage();
   const today = new Date().toISOString().slice(0, 10);
   const [data, setData] = useState({ items: [], nextCursor: null, summary: {} });
   const [options, setOptions] = useState({ agents: [], processes: [], modes: [], owners: [] });
-  const [reportTab, setReportTab] = useState("reports");
+  const [reportTab, setReportTab] = useState(summaryMode ? "summary" : "reports");
   const [selectedIds, setSelectedIds] = useState([]);
   const [cursorHistory, setCursorHistory] = useState([""]);
   const [pageIndex, setPageIndex] = useState(0);
@@ -756,7 +756,7 @@ export function ReportsView({ user, onNewAudit }) {
         ([key, value]) =>
           value && params.set(key, Array.isArray(value) ? value.join(",") : key === "to" ? `${value}T23:59:59` : value),
       );
-      if (reportTab === "summary") params.set("mode", "single");
+      if (summaryMode || reportTab === "summary") params.set("mode", "single");
       if (cursor) params.set("cursor", cursor);
       const next = await api(`/api/reports?${params}`);
       setData((current) => ({
@@ -780,7 +780,7 @@ export function ReportsView({ user, onNewAudit }) {
     setCursorHistory([""]); setPageIndex(0);
     const timer = setTimeout(() => load(), 180);
     return () => clearTimeout(timer);
-  }, [JSON.stringify(filters), reportTab]);
+  }, [JSON.stringify(filters), reportTab, summaryMode]);
   async function openReport(id) {
     setBusy(true);
     try {
@@ -898,14 +898,11 @@ export function ReportsView({ user, onNewAudit }) {
         </Card>
       </Workspace>
     );
+  const isSummary = summaryMode || reportTab === "summary";
   return (
     <Workspace
-      title={tr("Reports")}
-      subtitle={
-        user.role === "admin"
-          ? tr("All completed audit and insight reports.")
-          : tr("Your completed audit and insight reports.")
-      }
+      title={isSummary ? tr("Summary") : tr("Reports")}
+      subtitle={isSummary ? tr("Select completed QA calls to create a clear coaching summary.") : user.role === "admin" ? tr("All completed audit and insight reports.") : tr("Your completed audit and insight reports.")}
       actions={
         <Button onClick={onNewAudit}>
           <Plus size={16} /> {tr("New Audit")}
@@ -914,10 +911,6 @@ export function ReportsView({ user, onNewAudit }) {
     >
       <Card>
         <CardContent className="report-filters">
-          <div className="report-tabs">
-            <Button variant={reportTab === "reports" ? "default" : "outline"} onClick={() => { setReportTab("reports"); setSelectedIds([]); }}>{tr("Reports")}</Button>
-            <Button variant={reportTab === "summary" ? "default" : "outline"} onClick={() => { setReportTab("summary"); setSelectedIds([]); }}>{tr("Summary")}</Button>
-          </div>
           <div className="search-field">
             <Search size={16} />
             <Input
@@ -934,7 +927,7 @@ export function ReportsView({ user, onNewAudit }) {
           <MultiSelect
             id="report-modes"
             aria-label={tr("Report mode")}
-            value={reportTab === "summary" ? ["single"] : filters.mode}
+            value={isSummary ? ["single"] : filters.mode}
             placeholder={tr("All modes")}
             searchPlaceholder={tr("Search modes")}
             emptyText={tr("No results")}
@@ -945,7 +938,6 @@ export function ReportsView({ user, onNewAudit }) {
               { value: "single", label: tr("QA scorecard") },
               { value: "voice", label: tr("Customer voice") },
               { value: "coaching", label: tr("Advisor coaching") },
-              { value: "summary", label: tr("Summary") },
             ]}
           />
           <MultiSelect
@@ -1014,7 +1006,7 @@ export function ReportsView({ user, onNewAudit }) {
           />
         </CardContent>
       </Card>
-      {reportTab === "reports" && <div className="report-metrics">
+      {!isSummary && <div className="report-metrics">
         <Card><CardContent><strong>{data.summary?.callsEvaluated || 0}</strong><span>{tr("Calls evaluated")}</span></CardContent></Card>
         <Card><CardContent><strong>{data.summary?.averageQaScore ?? "—"}</strong><span>{tr("Average QA score")}</span></CardContent></Card>
         <Card><CardContent><strong>{data.summary?.ahtSeconds != null ? `${Math.round(data.summary.ahtSeconds)}s` : "—"}</strong><span>{tr("AHT")}</span></CardContent></Card>
@@ -1022,8 +1014,8 @@ export function ReportsView({ user, onNewAudit }) {
       </div>}
       <Notice message={message} error />
       <div className="history-list report-table-wrap">
-        <table className="report-table"><thead><tr>{reportTab === "summary" && <th>Select</th>}<th>Timestamp</th><th>Mode</th><th>Agent</th><th>Process</th><th>Duration</th><th>Score</th><th>CE</th><th> </th></tr></thead><tbody>
-        {data.items.map((item) => <tr key={item.id}>{reportTab === "summary" && <td><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => setSelectedIds((ids) => ids.includes(item.id) ? ids.filter((id) => id !== item.id) : [...ids, item.id])} disabled={item.status !== "success"} /></td>}<td>{dateText(item.timestamp, language)}</td><td>{modeName(item.mode, tr)}</td><td>{item.agentName || "—"}</td><td>{item.process || "—"}</td><td>{item.durationSeconds != null ? `${Math.round(item.durationSeconds)}s` : "—"}</td><td>{item.score != null ? `${item.ce ? 0 : item.score}${item.maximum ? ` / ${item.maximum}` : ""}` : "—"}</td><td>{item.ce ? <span className="ce-badge">CE</span> : "—"}</td><td className="report-action-cell"><Button variant="ghost" size="icon" onClick={() => openReport(item.reportId)} aria-label="Open report"><Eye size={17} /></Button></td></tr>)}
+        <table className="report-table"><thead><tr>{isSummary && <th>Select</th>}<th>Timestamp</th><th>Mode</th><th>Agent</th><th>Process</th><th>Duration</th><th>Score</th><th>CE</th><th> </th></tr></thead><tbody>
+        {data.items.map((item) => <tr key={item.id}>{isSummary && <td><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => setSelectedIds((ids) => ids.includes(item.id) ? ids.filter((id) => id !== item.id) : [...ids, item.id])} disabled={item.status !== "success"} /></td>}<td>{dateText(item.timestamp, language)}</td><td>{modeName(item.mode, tr)}</td><td>{item.agentName || "—"}</td><td>{item.process || "—"}</td><td>{item.durationSeconds != null ? `${Math.round(item.durationSeconds)}s` : "—"}</td><td>{item.score != null ? `${item.ce ? 0 : item.score}${item.maximum ? ` / ${item.maximum}` : ""}` : "—"}</td><td>{item.ce ? <span className="ce-badge">CE</span> : "—"}</td><td className="report-action-cell"><Button variant="ghost" size="icon" onClick={() => openReport(item.reportId)} aria-label="Open report"><Eye size={17} /></Button></td></tr>)}
         </tbody></table>
         {!busy && !data.items.length && (
           <div className="empty-state">
@@ -1035,7 +1027,7 @@ export function ReportsView({ user, onNewAudit }) {
           </div>
         )}
       </div>
-      {reportTab === "summary" && <div className="form-actions"><span>{selectedIds.length} selected</span><Button disabled={!selectedIds.length} onClick={async () => { setBusy(true); try { const value = await api("/api/report-summaries", { method: "POST", body: JSON.stringify({ recordIds: selectedIds }) }); setSelected(value.report); setReportTab("reports"); setSelectedIds([]); } catch (error) { setMessage(error.message); } finally { setBusy(false); } }}>{tr("Generate Summary")}</Button></div>}
+      {isSummary && <div className="form-actions"><span>{selectedIds.length} selected</span><Button disabled={!selectedIds.length} onClick={async () => { setBusy(true); try { const value = await api("/api/report-summaries", { method: "POST", body: JSON.stringify({ recordIds: selectedIds }) }); setSelected(value.report); setSelectedIds([]); } catch (error) { setMessage(error.message); } finally { setBusy(false); } }}>{tr("Generate Summary")}</Button></div>}
       {busy && (
         <div className="inline-loading">
           <RefreshCw className="spin" /> {tr("Loading reports…")}
@@ -1918,9 +1910,10 @@ function ScorecardsAdmin() {
   );
 }
 
-export function AdminView() {
+export function AdminView({ initialTab = "users", onTabChange }) {
   const tr = useTr();
-  const [tab, setTab] = useState("users");
+  const [tab, setTab] = useState(initialTab);
+  function changeTab(next) { setTab(next); onTabChange?.(next); }
   const views = {
     users: <UsersAdmin />,
     company: <CompanyAdmin />,
@@ -1933,7 +1926,7 @@ export function AdminView() {
       title={tr("Admin")}
       subtitle={tr("Manage access and future audit configuration.")}
     >
-      <Tabs value={tab} onValueChange={setTab}>
+      <Tabs value={tab} onValueChange={changeTab}>
         <TabsList className="subnav" aria-label={tr("Admin sections")}>
           {[
             ["users", tr("Users")],

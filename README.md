@@ -20,7 +20,7 @@ For non-technical QA users, managers, and administrators, see the [QA Auditor Us
 - `audit_result`: compatible QA columns plus ownership, job, file, and snapshot metadata
 - `analysis_jobs`, `analysis_cache`, `rate_limit_state`, and GridFS `audio_files`: reliable queued analysis
 
-Reports default to month-to-date and support agent, process, score, CE, owner, and text filters. The **Summary** view lets you select stored QA calls and generate one cross-call summary without re-uploading audio; each QA file in a multi-call run is evaluated sequentially and saved independently.
+Reports default to month-to-date and support agent, process, score, CE, owner, and text filters. Each QA file in a multi-call run is evaluated sequentially and saved independently.
 
 ## First installation with Docker
 

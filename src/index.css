@@ -163,11 +163,18 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .theme-dark .ui-dropdown-label strong, .theme-dark .card-title, .theme-dark .workspace-heading h1, .theme-dark .section-heading h2, .theme-dark .inline-heading h2, .theme-dark .report-content strong, .theme-dark .report-facts strong, .theme-dark .result-meta strong, .theme-dark .empty-state strong { color: var(--ink); }
 .theme-dark .dropzone { background: #252b33; border-color: #596371; color: var(--ink); }
 .theme-dark .dropzone:hover, .theme-dark .dropzone.drag-active { background: #302a31; }
+.theme-dark .flow-panel, .theme-dark .setup-panel, .theme-dark .provider-summary, .theme-dark .scorecard-summary, .theme-dark .file-type, .theme-dark .report-card > .card-header { background: var(--surface); color: var(--ink); }
+.theme-dark .page-heading h1, .theme-dark .report-heading h1 { color: var(--ink); }
+.theme-dark .mode-card { color: #c1c9d4; }
+.theme-dark .mode-card:hover { background: #39414c; }
+.theme-dark .mode-card.selected { background: #493034; color: #ffb8ba; border-color: #b96b70; }
 .theme-dark .file-row, .theme-dark .inline-reset, .theme-dark .report-facts span, .theme-dark .result-meta, .theme-dark .taxonomy-preview > div, .theme-dark .builder-category, .theme-dark .network-rule-header { background: var(--soft); }
 .theme-dark .file-type, .theme-dark .account-chip .avatar { background: #39414c; color: #d6dde6; }
 .theme-dark .report-table th { color: var(--muted); background: #303741; }
 .theme-dark .report-table tbody tr:nth-child(even) { background: #252b33; }
 .theme-dark .report-content blockquote { background: #332a2d; color: #d0d6de; }
+.theme-dark .report-content { color: #e0e5eb; }
+.theme-dark .report-content h2 { border-top-color: #4b5563; }
 .theme-dark .report-content table { background: #252b33; }
 .theme-dark .report-content th { background: #343b45; color: var(--ink); }
 .theme-dark .report-content tbody tr:nth-child(even) { background: #2b313a; }

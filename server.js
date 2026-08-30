@@ -885,6 +885,24 @@ function createApp(options = {}) {
 
   app.get('/api/reports/options', requireAuth, requireReady, async (req, res) => { try { return res.json(await (dataStore.listReportRecordOptions ? dataStore.listReportRecordOptions(req.currentUser) : { agents: [], processes: [], modes: [], parameters: [], owners: [] })); } catch (error) { console.error('Report options lookup failed:', error.message); return res.status(503).json({ error: 'Report filters are temporarily unavailable.' }); } });
   app.get('/api/reports', requireAuth, requireReady, async (req, res) => { try { return res.json(await (dataStore.listReportRecords ? dataStore.listReportRecords(req.currentUser, req.query) : dataStore.listReports(req.currentUser, req.query))); } catch (error) { console.error('Report history lookup failed:', error.message); return res.status(503).json({ error: 'Report history is temporarily unavailable.' }); } });
+  app.post('/api/report-summaries', requireSameOrigin, requireAuth, requireReady, jsonSmall, async (req, res) => {
+    const ids = Array.isArray(req.body?.recordIds) ? req.body.recordIds.map(String).slice(0, 20) : [];
+    if (!ids.length) return res.status(400).json({ error: 'Select at least one QA call.' });
+    try {
+      const records = await dataStore.getReportRecordsForSummary(req.currentUser, ids);
+      if (records.length !== ids.length) return res.status(403).json({ error: 'One or more selected calls are unavailable.' });
+      const provider = String(req.body?.provider || (req.currentUser.providers || [])[0] || 'gemini').toLowerCase();
+      const owner = await dataStore.findByEmail(req.currentUser.email, { includeSecrets: true });
+      const apiKey = owner?.[`${provider}Key`];
+      if (!apiKey) return res.status(400).json({ error: `Add a ${provider} API key before generating a summary.` });
+      const source = records.map((record, index) => `## Call ${index + 1}: ${record.fileName}\nAgent: ${record.agentName || 'Unknown'}\nProcess: ${record.process || '—'}\nScore: ${record.ce ? 0 : record.score ?? '—'} / ${record.maximum ?? '—'}\nCE: ${record.ce ? 'Yes' : 'No'}\nDuration: ${record.durationSeconds ?? 'unknown'} seconds\n\n${record.markdown}`).join('\n\n---\n\n');
+      const prompt = `Create a concise cross-call QA summary in Markdown from the stored reports below. Do not invent facts. Include overall findings, recurring strengths, recurring gaps, coaching priorities, score/CE patterns, and recommended next actions.\n\n${source}`;
+      const generated = providerClient.callMarkdownWithMeta ? await providerClient.callMarkdownWithMeta(provider, apiKey, [], prompt) : { value: await providerClient.callMarkdown(provider, apiKey, [], prompt), model: '' };
+      const report = await dataStore.saveReportRun({ jobId: crypto.randomUUID(), ownerUserId: req.currentUser.id, ownerEmail: req.currentUser.email, ownerName: req.currentUser.username || req.currentUser.name, mode: 'summary', provider, model: generated.model || '', companySnapshot: req.currentUser.companyName, parameterSnapshot: 'Summary', files: records.map(record => ({ name: record.fileName, sha256: record.fileHash || '' })), items: [{ kind: 'summary', status: 'success', markdown: generated.value, model: generated.model || '' }], report: generated.value, partial: false, sourceRecordIds: records.map(record => record.id), searchText: `${req.currentUser.email} ${records.map(record => record.fileName).join(' ')} ${generated.value}`.slice(0, 16000), completedAt: new Date() });
+      await dataStore.incrementUsage(req.currentUser.email).catch(() => {});
+      return res.json({ report: { ...report, id: report.id || String(report._id || '') } });
+    } catch (error) { const safe = safeProviderFailure(error); return res.status(safe.errorCode === 'rate_limited' ? 429 : 503).json({ error: safe.error, errorCode: safe.errorCode, retryable: safe.retryable }); }
+  });
   app.get('/api/reports/:id', requireAuth, requireReady, async (req, res) => { try { const report = await dataStore.getReport(req.currentUser, req.params.id); return report ? res.json({ report }) : res.status(404).json({ error: 'Report was not found.' }); } catch { return res.status(503).json({ error: 'The report is temporarily unavailable.' }); } });
 
   app.put('/api/admin/users/:id/role', requireSameOrigin, requireAuth, requireReady, requireAdmin, jsonSmall, async (req, res, next) => { if (req.body?.role !== 'manager') return next(); if (String(req.currentUser.id) === String(req.params.id)) return res.status(400).json({ error: 'Ask another administrator to change your role.' }); try { await dataStore.setUserRole(req.params.id, 'manager'); return res.json({ ok: true }); } catch (error) { return res.status(400).json({ error: error.message }); } });

@@ -53,7 +53,7 @@ The previous report is preserved in Reports, and the fresh result is stored as a
 
 ## Reports
 
-Reports is a searchable history of evaluated calls. It includes QA, Customer Voice, and Advisor Coaching reports.
+Reports is a searchable history of evaluated calls. It includes QA, Customer Voice, Advisor Coaching, and generated Summary reports.
 
 The table shows timestamp, mode, agent, process, duration, score, and CE status. Select the eye action to open a report. PDF, Word, and Copy actions are available from the report detail view.
 
@@ -80,6 +80,18 @@ The cards below the filters show the current filtered results:
 - **Average QA score** — average score, including CE calls as zero.
 - **AHT** — average duration for calls with a known duration.
 - **CE count** — number of critical-error calls.
+
+## Generating a stored-call Summary
+
+The Reports **Summary** view creates a cross-call summary without uploading or re-analyzing audio.
+
+1. Open **Reports → Summary**.
+2. Use the filters to find QA scorecard calls.
+3. Tick the calls you want to compare.
+4. Press **Generate Summary**.
+5. Open, copy, or export the generated Summary report.
+
+Only QA scorecard records can be selected. The generated Summary is saved in normal report history.
 
 ## Account menu
 
@@ -174,4 +186,4 @@ Archived scorecards are removed from new selectors but remain available in old r
 - Keep the correct process scorecard selected.
 - Use Re-audit only when a fresh evaluation is needed.
 - Review failed-call notices before assuming a whole batch completed.
-- Use Reports filters to find previous calls for coaching reviews instead of uploading the same calls again.
+- Use Reports filters and Summary for coaching reviews instead of uploading the same calls again.

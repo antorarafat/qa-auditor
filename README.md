@@ -26,6 +26,36 @@ Reports default to month-to-date and support agent, process, score, CE, owner, a
 
 Requirements: Docker Compose and MongoDB. Use MongoDB TLS whenever it is reached over the internet.
 
+### Guided installation (recommended)
+
+The installer asks for the MongoDB URI, database, public origin, deployment namespace, and host port. It generates `SESSION_SECRET`, `APP_ENCRYPTION_KEY`, and `SETUP_TOKEN`, writes a mode-600 `.env`, builds the image, and starts the service:
+
+```sh
+./scripts/install_docker.sh
+```
+
+The default host port is **3423**, so the local address is `http://localhost:3423`. To review the connection details and setup token later:
+
+```sh
+./scripts/credential.sh
+```
+
+The helper masks the MongoDB password. Use `./scripts/credential.sh --show-secrets` only on a trusted terminal.
+
+For a MongoDB server running on the same host as Docker, enter a URI using `host.docker.internal`, for example:
+
+```text
+mongodb://USER:PASSWORD@host.docker.internal:27017/10ms-qaaudit?authSource=admin
+```
+
+For an external MongoDB server, enter its hostname or SRV URI, normally with TLS:
+
+```text
+mongodb+srv://USER:PASSWORD@cluster.example/10ms-qaaudit
+```
+
+Compose maps `host.docker.internal` to the Docker host with `host-gateway`. This is needed on Linux because containers otherwise resolve `localhost` to the container itself; it is harmless on Docker Desktop.
+
 1. Copy the environment template: `cp .env.example .env`.
 2. Generate three independent secrets:
 
@@ -36,7 +66,7 @@ Requirements: Docker Compose and MongoDB. Use MongoDB TLS whenever it is reached
    ```
 
 3. Set `MONGODB_URI`, `MONGODB_DATABASE`, the generated secrets, exact public HTTPS origin, and a unique `DEPLOYMENT_NAMESPACE` in `.env`. A hosted MongoDB URI will commonly include `tls=true`; follow your provider’s instructions.
-4. Run `docker compose up --build -d`.
+4. Set `HOST_PORT=3423` (or another unused host port) and run `docker compose up --build -d`.
 5. Open `/setup`. Enter the `SETUP_TOKEN`, first administrator email, username, password, and company name. Setup permanently closes after that administrator is created.
 6. Sign in. Add your personal provider key under **Account security**, then add products and a scorecard under **Admin**.
 
@@ -46,12 +76,16 @@ MongoDB creates the database on its first write. Startup automatically creates c
 
 Node.js 20 or newer is required.
 
+For an interactive setup that defaults to port **3423**:
+
 ```sh
-cp .env.example .env
-npm ci
-npm run build
+./scripts/install_native.sh
 npm start
 ```
+
+The native installer accepts `mongodb://USER:PASSWORD@127.0.0.1:27017/10ms-qaaudit` for a local MongoDB and an external/TLS URI such as `mongodb+srv://USER:PASSWORD@cluster.example/10ms-qaaudit`.
+
+To configure manually instead, copy `.env.example` to `.env`, set `PORT`, MongoDB, and the generated secrets, then run `npm ci`, `npm run build`, and `npm start`.
 
 Open `http://localhost:3000`. `npm run dev` runs the React development server.
 

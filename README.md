@@ -28,7 +28,7 @@ Requirements: Docker Compose and MongoDB. Use MongoDB TLS whenever it is reached
 
 ### Guided installation (recommended)
 
-The installer asks for the MongoDB URI, database, public origin, deployment namespace, and host port. It generates `SESSION_SECRET`, `APP_ENCRYPTION_KEY`, and `SETUP_TOKEN`, writes a mode-600 `.env`, builds the image, and starts the service:
+The installer asks for the MongoDB URI, database, public origin, host port, optional LAN/Tailscale addresses, and deployment namespace. It always allows `localhost` and `127.0.0.1`; entering a LAN or Tailscale IPv4 adds that address to the browser request allowlist. It generates `SESSION_SECRET`, `APP_ENCRYPTION_KEY`, and `SETUP_TOKEN`, writes a mode-600 `.env`, builds the image, and starts the service:
 
 ```sh
 ./scripts/install_docker.sh
@@ -83,7 +83,7 @@ For an interactive setup that defaults to port **3423**:
 npm start
 ```
 
-The native installer accepts `mongodb://USER:PASSWORD@127.0.0.1:27017/10ms-qaaudit` for a local MongoDB and an external/TLS URI such as `mongodb+srv://USER:PASSWORD@cluster.example/10ms-qaaudit`.
+The native installer accepts `mongodb://USER:PASSWORD@127.0.0.1:27017/10ms-qaaudit` for a local MongoDB and an external/TLS URI such as `mongodb+srv://USER:PASSWORD@cluster.example/10ms-qaaudit`. It also asks for optional LAN and Tailscale addresses so users can sign in through those network URLs.
 
 To configure manually instead, copy `.env.example` to `.env`, set `PORT`, MongoDB, and the generated secrets, then run `npm ci`, `npm run build`, and `npm start`.
 

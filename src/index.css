@@ -590,6 +590,7 @@ body[data-workspace-theme="dark"] .report-table tbody tr:nth-child(odd),
 body[data-workspace-theme="dark"] .report-table tbody tr:nth-child(even) { background: #252b33; color: #edf1f5; }
 body[data-workspace-theme="dark"] .report-table tbody tr:nth-child(even) { background: #2b313a; }
 body[data-workspace-theme="dark"] .report-table tbody tr:hover { background: #39414c; }
+body[data-workspace-theme="dark"] .report-content tbody tr:last-child { background: #343b45; color: #edf1f5; }
 body[data-workspace-theme="dark"] .catalog-preview,
 body[data-workspace-theme="dark"] .taxonomy-preview > div,
 body[data-workspace-theme="dark"] .builder-category,

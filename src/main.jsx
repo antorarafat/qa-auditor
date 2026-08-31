@@ -359,6 +359,9 @@ function AppContent({ language, toggleLanguage, theme, toggleTheme }) {
     }
   }, [user]);
   useEffect(() => {
+    document.body.dataset.workspaceTheme = user ? theme : "light";
+  }, [theme, user]);
+  useEffect(() => {
     if (result) requestAnimationFrame(() => reportCardRef.current?.focus());
   }, [result]);
 
@@ -1304,9 +1307,6 @@ function App() {
   useEffect(() => {
     localStorage.setItem("qa-theme", theme);
   }, [theme]);
-  useEffect(() => {
-    document.body.dataset.workspaceTheme = user ? theme : "light";
-  }, [theme, user]);
   const toggleLanguage = () =>
     setLanguage((current) => (current === "en" ? "bn" : "en"));
   const toggleTheme = () =>

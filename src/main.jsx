@@ -1304,6 +1304,9 @@ function App() {
   useEffect(() => {
     localStorage.setItem("qa-theme", theme);
   }, [theme]);
+  useEffect(() => {
+    document.body.dataset.workspaceTheme = user ? theme : "light";
+  }, [theme, user]);
   const toggleLanguage = () =>
     setLanguage((current) => (current === "en" ? "bn" : "en"));
   const toggleTheme = () =>

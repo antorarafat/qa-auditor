@@ -543,3 +543,60 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .report-content th, .report-content td { padding: 5pt; }
   .failed-result { break-after: auto; page-break-after: auto; }
 }
+
+/* Portal surfaces are rendered under body, so keep them in the same material
+   palette as the authenticated workspace (Radix menus/popovers use portals). */
+body[data-workspace-theme="dark"] {
+  background: #20252c;
+  color: #edf1f5;
+}
+body[data-workspace-theme="dark"] .ui-label,
+body[data-workspace-theme="dark"] .field-state,
+body[data-workspace-theme="dark"] .workspace-heading p,
+body[data-workspace-theme="dark"] .card-description { color: #b2bbc7; }
+body[data-workspace-theme="dark"] .topbar,
+body[data-workspace-theme="dark"] .ui-tabs-list { background: #2b313a; border-color: #454d58; }
+body[data-workspace-theme="dark"] .ui-card,
+body[data-workspace-theme="dark"] .flow-panel,
+body[data-workspace-theme="dark"] .setup-panel,
+body[data-workspace-theme="dark"] .history-row,
+body[data-workspace-theme="dark"] .report-card,
+body[data-workspace-theme="dark"] .report-card > .card-header { background: #292f37; color: #edf1f5; border-color: #454d58; }
+body[data-workspace-theme="dark"] .ui-input,
+body[data-workspace-theme="dark"] .ui-textarea,
+body[data-workspace-theme="dark"] .ui-select-trigger { background: #222830; color: #edf1f5; border-color: #596371; }
+body[data-workspace-theme="dark"] .button-outline { background: #2b313a; color: #edf1f5; border-color: #596371; }
+body[data-workspace-theme="dark"] .ui-dropdown-content,
+body[data-workspace-theme="dark"] .ui-select-content,
+body[data-workspace-theme="dark"] .multi-select-popover,
+body[data-workspace-theme="dark"] .date-picker-popover,
+body[data-workspace-theme="dark"] .ui-dialog-content { background: #292f37; color: #edf1f5; border-color: #596371; }
+body[data-workspace-theme="dark"] .ui-dropdown-item,
+body[data-workspace-theme="dark"] .ui-dropdown-label strong,
+body[data-workspace-theme="dark"] .ui-select-item,
+body[data-workspace-theme="dark"] .multi-select-command [cmdk-item] { color: #edf1f5; }
+body[data-workspace-theme="dark"] .ui-dropdown-item[data-highlighted],
+body[data-workspace-theme="dark"] .ui-select-item[data-highlighted],
+body[data-workspace-theme="dark"] .multi-select-command [cmdk-item][data-selected="true"] { background: #39414c; }
+body[data-workspace-theme="dark"] .page-heading h1,
+body[data-workspace-theme="dark"] .workspace-heading h1,
+body[data-workspace-theme="dark"] .section-heading h2,
+body[data-workspace-theme="dark"] .inline-heading h2,
+body[data-workspace-theme="dark"] .card-title { color: #edf1f5; }
+body[data-workspace-theme="dark"] .report-table { background: #252b33; color: #edf1f5; }
+body[data-workspace-theme="dark"] .report-table th { background: #343b45; color: #c3cbd6; }
+body[data-workspace-theme="dark"] .report-table tbody tr,
+body[data-workspace-theme="dark"] .report-table tbody tr:nth-child(odd),
+body[data-workspace-theme="dark"] .report-table tbody tr:nth-child(even) { background: #252b33; color: #edf1f5; }
+body[data-workspace-theme="dark"] .report-table tbody tr:nth-child(even) { background: #2b313a; }
+body[data-workspace-theme="dark"] .report-table tbody tr:hover { background: #39414c; }
+body[data-workspace-theme="dark"] .catalog-preview,
+body[data-workspace-theme="dark"] .taxonomy-preview > div,
+body[data-workspace-theme="dark"] .builder-category,
+body[data-workspace-theme="dark"] .inline-reset,
+body[data-workspace-theme="dark"] .report-facts span,
+body[data-workspace-theme="dark"] .result-meta,
+body[data-workspace-theme="dark"] .file-row { background: #343b45; color: #edf1f5; }
+body[data-workspace-theme="dark"] .account-chip { color: #edf1f5; }
+body[data-workspace-theme="dark"] .account-chip .avatar { background: #39414c; color: #d6dde6; }
+body[data-workspace-theme="dark"] .management-notice.error { background: #422d31; color: #ffb4b5; }

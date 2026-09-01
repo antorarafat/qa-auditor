@@ -157,6 +157,7 @@ const copy = {
     noParameter: "Choose a QA parameter.",
     serverError: "Something went wrong. Please try again.",
     loginError: "Invalid email or password.",
+    loginRateLimited: "Too many login attempts. Please wait a few minutes and try again.",
     networkAccessError: "This network address is not allowed.",
     unavailable: "The authentication service is unavailable.",
     companyFallback: "QA Auditor",
@@ -239,6 +240,7 @@ const copy = {
     noParameter: "একটি QA প্যারামিটার বেছে নিন।",
     serverError: "সমস্যা হয়েছে। আবার চেষ্টা করুন।",
     loginError: "ইমেইল বা পাসওয়ার্ড সঠিক নয়।",
+    loginRateLimited: "অনেকবার লগইন চেষ্টা হয়েছে। কয়েক মিনিট অপেক্ষা করে আবার চেষ্টা করুন।",
     networkAccessError: "এই নেটওয়ার্ক ঠিকানাটি অনুমোদিত নয়।",
     unavailable: "অথেন্টিকেশন সার্ভিস এখন unavailable।",
     companyFallback: "QA Auditor",
@@ -438,7 +440,9 @@ function AppContent({ language, toggleLanguage, theme, toggleTheme }) {
       const data = await response.json().catch(() => ({}));
       if (!response.ok)
         throw new Error(
-          response.status === 403
+          response.status === 429
+            ? t.loginRateLimited
+            : response.status === 403
             ? t.networkAccessError
             : response.status === 503
               ? t.unavailable
